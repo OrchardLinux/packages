@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Inside an Arch Linux ARM container: ask pacman, for every architecture,
+# whether each package of the published repository still installs beside
+# today's Arch packages (Arch moving LLVM breaks Mesa until it is rebuilt).
+# Nothing is installed: pacman only resolves, into an empty root, so one
+# container answers for both architectures. Names that no longer resolve go to
+# /out/broken, one per line.
+set -euo pipefail
+: "${ORCHARD_SERVER_BASE:?}"
+sed -i '/^DownloadUser = /d; /^DisableSandbox/d; /^CheckSpace/a DisableSandboxFilesystem\nDisableSandboxSyscalls' /etc/pacman.conf
+: > /out/broken
+for arch in aarch64 armv7h; do
+  root=$(mktemp -d)
+  mkdir -p "$root/var/lib/pacman"
+  sed "s/^#\?Architecture *=.*/Architecture = $arch/" /etc/pacman.conf > "$root/pacman.conf"
+  sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER_BASE/repo-$arch\n" "$root/pacman.conf"
+  pacman=(pacman --config "$root/pacman.conf" --root "$root" --dbpath "$root/var/lib/pacman"
+    --cachedir "$root/cache" --noconfirm)
+  # A mirror that does not answer is an error of this run, not a broken package.
+  "${pacman[@]}" -Sy
+  for name in $("${pacman[@]}" -Slq orchard); do
+    if "${pacman[@]}" -Sp "$name" > /dev/null 2> "$root/error"; then
+      echo "installs  $arch $name"
+    else
+      echo "BROKEN    $arch $name: $(tr '\n' ' ' < "$root/error")"
+      echo "$name" >> /out/broken
+    fi
+  done
+done

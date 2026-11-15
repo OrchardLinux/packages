@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Run a command in the Arch Linux ARM container of one architecture, on an
+# arm64 host with Docker (GitHub's ubuntu-24.04-arm runners).
+#
+#   ci/container ARCH [DOCKER-RUN-OPTIONS... --] COMMAND...
+#
+# aarch64 is a pinned image. armv7h is Arch Linux ARM's official root archive
+# of one dated build (the copy omarchy-a keeps in its releases, which verified
+# its signature), imported once per host and run by the 64-bit kernel's 32-bit
+# mode: no emulation. Inside, `uname -m` then says armv8l, so the scripts in
+# this directory name the architecture themselves.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+arch=$1; shift
+options=()
+for ((i = 1; i <= $#; i++)); do
+  if [[ ${!i} == -- ]]; then options=("${@:1:i-1}"); shift "$i"; break; fi
+done
+value() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' "$here/containers.json" "$arch" "$1"; }
+image=$(value image)
+case "$arch" in
+  aarch64) platform=linux/arm64; wrap=() ;;
+  armv7h)
+    platform=linux/arm/v7; wrap=(linux32)
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      archive=$(mktemp)
+      trap 'rm -f -- "$archive"' EXIT
+      curl -fL --retry 3 --max-time 600 -o "$archive" "$(value bootstrap)"
+      echo "$(value sha256)  $archive" | sha256sum -c -
+      docker import --platform "$platform" "$archive" "$image" >/dev/null
+      rm -f -- "$archive"
+    fi ;;
+  *) echo "ci/container: unknown architecture $arch" >&2; exit 2 ;;
+esac
+exec docker run --rm --platform "$platform" -e ORCHARD_ARCH="$arch" -e RANK_MIRRORS_ARCH="$arch" \
+  "${options[@]}" "$image" "${wrap[@]}" "$@"

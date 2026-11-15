@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""The package repository's bookkeeping: what to build, and moving source pins.
+
+  pkgrepo check                       every recipe agrees with its source pin
+  pkgrepo plan [--package NAME]       which packages the published repository lacks (JSON for CI)
+  pkgrepo record STATE NAME...        note the recipes the named packages were built from in STATE
+  pkgrepo bump [--repository R --commit SHA] [--package NAME]
+                                      move tracked pins to their source's newest commit
+  pkgrepo rebuild [--published-only] NAME...
+                                      raise pkgrel: same source, built again
+  pkgrepo prune --index DB... --assets FILE...
+                                      which published package files no given index names any more
+
+Standard library only. A recipe (packages/NAME/pacman/PKGBUILD) states epoch,
+pkgver, pkgrel and arch as plain assignments; they are read here without bash.
+"""
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import tarfile
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGES = ROOT / 'packages'
+ARCHES = ('aarch64', 'armv7h')
+REPOSITORY = os.environ.get('GITHUB_REPOSITORY', 'OrchardLinux/packages')
+# Packages whose compile is long enough for a compiler cache to pay.
+CCACHE = {'mesa'}
+
+
+def server(arch):
+    return f'https://github.com/{REPOSITORY}/releases/download/repo-{arch}'
+
+
+def fail(message):
+    sys.exit('pkgrepo: ' + message)
+
+
+def names():
+    return sorted(p.parent.parent.name for p in PACKAGES.glob('*/pacman/PKGBUILD'))
+
+
+def recipe(name):
+    path = PACKAGES / name / 'pacman/PKGBUILD'
+    if not path.is_file():
+        fail(f'no recipe for {name}')
+    text = path.read_text()
+    fields = {}
+    for key in ('pkgname', 'epoch', 'pkgver', 'pkgrel'):
+        found = re.findall(rf"^{key}=(['\"]?)([A-Za-z0-9._+-]+)\1$", text, re.M)
+        if len(found) > 1 or (not found and key != 'epoch'):
+            fail(f'{name}: {key} must be one plain assignment')
+        fields[key] = found[0][1] if found else None
+    if fields['pkgname'] != name:
+        fail(f'{name}: pkgname is {fields["pkgname"]}')
+    arch = re.findall(r'^arch=\(([^)]*)\)$', text, re.M)
+    if len(arch) != 1:
+        fail(f'{name}: arch must be one plain assignment')
+    fields['arch'] = [a for a in re.findall(r'[a-z0-9_]+', arch[0]) if a in ARCHES]
+    epoch = fields['epoch'] + ':' if fields['epoch'] else ''
+    fields['version'] = f'{epoch}{fields["pkgver"]}-{fields["pkgrel"]}'
+    fields['text'] = text
+    return fields
+
+
+def recipe_digest(name):
+    """One digest over everything a package is built from: pin, patches, recipe."""
+    digest = hashlib.sha256()
+    base = PACKAGES / name
+    for path in sorted(p for p in base.rglob('*') if p.is_file()):
+        digest.update(path.relative_to(base).as_posix().encode() + b'\0' +
+                      hashlib.sha256(path.read_bytes()).hexdigest().encode() + b'\n')
+    return digest.hexdigest()
+
+
+def pin(name):
+    return json.loads((PACKAGES / name / 'source.json').read_text())
+
+
+def check(_args=None):
+    for name in names():
+        source, built = pin(name), recipe(name)
+        for key in ('sha256', 'commit'):
+            if key in source and source[key] not in built['text']:
+                fail(f'{name}: the recipe does not name the pinned {key} {source[key]}')
+        if 'file' in source:
+            path = PACKAGES / name / source['file']
+            if hashlib.sha256(path.read_bytes()).hexdigest() != source['sha256']:
+                fail(f'{name}: {source["file"]} differs from its pin')
+        if 'track' in source and built['pkgver'] != tracked_pkgver(source):
+            fail(f'{name}: pkgver {built["pkgver"]} is not the pinned commit\'s {tracked_pkgver(source)}')
+        if not built['arch']:
+            fail(f'{name}: builds for none of {", ".join(ARCHES)}')
+    print('Recipes agree with their pins:', ', '.join(names()))
+
+
+def fetch(url, *, token=True, binary=True, headers=False):
+    request = Request(url, headers={'User-Agent': 'orchard-packages'})
+    key = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+    if token and key and url.startswith('https://api.github.com/'):
+        request.add_header('Authorization', 'Bearer ' + key)
+    with urlopen(request, timeout=120) as response:
+        data = response.read()
+        if headers:
+            return data, response.headers
+        return data if binary else data.decode()
+
+
+def entries(data):
+    """A pacman index's packages: {name: (version, file name)}."""
+    found = {}
+    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+        for member in archive:
+            if member.name.endswith('/desc'):
+                lines = archive.extractfile(member).read().decode().split('\n')
+                value = lambda key: lines[lines.index(key) + 1]
+                found[value('%NAME%')] = (value('%VERSION%'), value('%FILENAME%'))
+    return found
+
+
+def published(arch):
+    """The published index of one architecture: {package name: version}."""
+    try:
+        data = fetch(server(arch) + '/orchard.db')
+    except HTTPError as error:
+        if error.code == 404:
+            return {}
+        raise
+    return {name: version for name, (version, _) in entries(data).items()}
+
+
+def state(arch):
+    """What the publish job recorded: {package name: {version, recipe}}."""
+    try:
+        return json.loads(fetch(server(arch) + '/built.json'))
+    except HTTPError as error:
+        if error.code == 404:
+            return {}
+        raise
+
+
+def plan(args):
+    check()
+    builds, changed = [], []
+    for arch in ARCHES:
+        index, recorded = published(arch), state(arch)
+        for name in names():
+            built = recipe(name)
+            if arch not in built['arch'] or (args.package and name != args.package):
+                continue
+            if index.get(name) != built['version']:
+                builds.append({'package': name, 'arch': arch, 'version': built['version'],
+                               'ccache': name in CCACHE})
+                print(f'build   {arch:8} {name} {built["version"]} (published: {index.get(name, "nothing")})',
+                      file=sys.stderr)
+            elif recorded.get(name, {}).get('recipe') not in (None, recipe_digest(name)):
+                changed.append(f'{name} ({arch})')
+            else:
+                print(f'current {arch:8} {name} {built["version"]}', file=sys.stderr)
+    if changed:
+        fail('recipe, patches or pin changed but the version is already published: ' + ', '.join(changed) +
+             '. Raise pkgrel (tools/pkgrepo rebuild NAME).')
+    result = {'matrix': json.dumps({'include': builds}), 'any': 'true' if builds else 'false',
+              'arches': json.dumps(sorted({b['arch'] for b in builds}))}
+    lines = ''.join(f'{key}={value}\n' for key, value in result.items())
+    output = os.environ.get('GITHUB_OUTPUT')
+    if output:
+        with open(output, 'a') as stream:
+            stream.write(lines)
+    else:
+        sys.stdout.write(lines)
+
+
+def record(args):
+    """After packages of ARCH were added to the index: note their recipes."""
+    path = Path(args.state)
+    recorded = json.loads(path.read_text()) if path.is_file() else {}
+    for name in args.names:
+        recorded[name] = {'version': recipe(name)['version'], 'recipe': recipe_digest(name)}
+    path.write_text(json.dumps(recorded, indent=2, sort_keys=True) + '\n')
+
+
+def tracked_pkgver(source):
+    """Mesa's 27.0.0-devel at commit number 232935 is 27.0.0.dev.r232935.2c1aa767d8d."""
+    version = source['version'].replace('-devel', '.dev').replace('-', '.')
+    return f'{version}.r{source["revision"]}.{source["commit"][:11]}'
+
+
+def api(path):
+    return json.loads(fetch('https://api.github.com/' + path))
+
+
+def bump_one(name, commit=None):
+    source = pin(name)
+    repository, branch, old = source['repository'], source['track'], source['commit']
+    head = api(f'repos/{repository}/commits/{branch}')['sha']
+    new = commit or head
+    if not re.fullmatch(r'[0-9a-f]{40}', new):
+        fail(f'{name}: not a commit ID: {new}')
+    if new == old:
+        print(f'{name}: {repository} {branch} is still {old[:11]}')
+        return False
+    # GitHub serves commits of forks under the parent's name: only a commit
+    # that the tracked branch contains, and that continues the pinned one.
+    if new != head and api(f'repos/{repository}/compare/{new}...{branch}')['status'] not in ('ahead', 'identical'):
+        fail(f'{name}: {new} is not on {repository} {branch}')
+    relation = api(f'repos/{repository}/compare/{old}...{new}')['status']
+    if relation == 'behind':
+        print(f'{name}: {new[:11]} is older than the pinned {old[:11]}; nothing to do')
+        return False
+    if relation != 'ahead':
+        fail(f'{name}: {new[:11]} does not continue the pinned {old[:11]} ({relation}); '
+             f'{repository} {branch} was rewritten, move the pin by hand')
+    _, headers = fetch(f'https://api.github.com/repos/{repository}/commits?sha={new}&per_page=1', headers=True)
+    revision = int(re.search(r'[?&]page=(\d+)>; rel="last"', headers.get('Link', '')).group(1))
+    version = fetch(f'https://raw.githubusercontent.com/{repository}/{new}/VERSION', binary=False).strip()
+    url = f'https://github.com/{repository}/archive/{new}.tar.gz'
+    digest = hashlib.sha256(fetch(url)).hexdigest()
+    path = PACKAGES / name / 'pacman/PKGBUILD'
+    text = path.read_text()
+    updated = dict(source, version=version, commit=new, revision=revision, url=url, sha256=digest)
+    for pattern, value in ((r'^_commit=.*$', '_commit=' + new), (r'^pkgver=.*$', 'pkgver=' + tracked_pkgver(updated)),
+                           (r'^pkgrel=.*$', 'pkgrel=1')):
+        text, count = re.subn(pattern, value, text, flags=re.M)
+        if count != 1:
+            fail(f'{name}: the recipe has no single line for {pattern}')
+    if text.count(source['sha256']) != 1:
+        fail(f'{name}: the recipe does not name the old archive checksum once')
+    path.write_text(text.replace(source['sha256'], digest))
+    (PACKAGES / name / 'source.json').write_text(json.dumps(updated, indent=2) + '\n')
+    print(f'{name}: {repository} {old[:11]} -> {new[:11]} ({tracked_pkgver(updated)})')
+    return True
+
+
+def bump(args):
+    if args.commit and not args.repository and not args.package:
+        fail('--commit needs --repository or --package')
+    moved = []
+    for name in names():
+        source = pin(name)
+        if 'track' not in source or (args.package and name != args.package):
+            continue
+        if args.repository and source['repository'].lower() != args.repository.lower():
+            continue
+        if bump_one(name, args.commit):
+            moved.append(name)
+    check()
+    output = os.environ.get('GITHUB_OUTPUT')
+    if output:
+        with open(output, 'a') as stream:
+            stream.write('moved=' + ' '.join(moved) + '\n')
+
+
+def rebuild(args):
+    for name in args.names:
+        built = recipe(name)
+        if args.published_only and not any(
+                published(arch).get(name) == built['version'] for arch in built['arch']):
+            fail(f'{name} {built["version"]} is not published: an earlier rebuild is still building or failed')
+        parts = built['pkgrel'].split('.')
+        parts[-1] = str(int(parts[-1]) + 1)
+        path = PACKAGES / name / 'pacman/PKGBUILD'
+        path.write_text(re.sub(r'^pkgrel=.*$', 'pkgrel=' + '.'.join(parts), built['text'], flags=re.M))
+        print(f'{name}: pkgrel {built["pkgrel"]} -> {".".join(parts)}')
+
+
+def prune(args):
+    """Of a release's files, the packages that neither the new index nor the one before it names.
+
+    A tablet that read the index a moment before a publish still finds its files.
+    """
+    keep = set()
+    for path in args.index:
+        if Path(path).is_file():
+            keep |= {filename for _, filename in entries(Path(path).read_bytes()).values()}
+    for asset in args.assets:
+        if '.pkg.tar.' in asset and asset.removesuffix('.sig') not in keep:
+            print(asset)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('check').set_defaults(run=check)
+    sub = commands.add_parser('plan')
+    sub.add_argument('--package')
+    sub.set_defaults(run=plan)
+    sub = commands.add_parser('record')
+    sub.add_argument('state')
+    sub.add_argument('names', nargs='+')
+    sub.set_defaults(run=record)
+    sub = commands.add_parser('bump')
+    sub.add_argument('--repository')
+    sub.add_argument('--commit')
+    sub.add_argument('--package')
+    sub.set_defaults(run=bump)
+    sub = commands.add_parser('rebuild')
+    sub.add_argument('--published-only', action='store_true',
+                     help='refuse unless the current version is the published one')
+    sub.add_argument('names', nargs='+')
+    sub.set_defaults(run=rebuild)
+    sub = commands.add_parser('prune')
+    sub.add_argument('--index', nargs='+', required=True)
+    sub.add_argument('--assets', nargs='*', default=[])
+    sub.set_defaults(run=prune)
+    args = parser.parse_args()
+    args.run(args)
+
+
+if __name__ == '__main__':
+    main()

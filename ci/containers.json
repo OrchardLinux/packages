@@ -1,0 +1,10 @@
+{
+  "aarch64": {
+    "image": "docker.io/arch4edu/archlinuxarm@sha256:1db43d1af9917db5fd34af3dab64e2b229a21240e81bb765e3d2d3c34739d587"
+  },
+  "armv7h": {
+    "bootstrap": "https://github.com/OrchardLinux/omarchy-a/releases/download/armv7-bootstrap-20260805/ArchLinuxARM-armv7-20260805.tar.gz",
+    "sha256": "ebe0fa119dea45e3af0aa61785676bdbf417bc5f754d529b87255dbf0ca4e3f0",
+    "image": "localhost/archlinuxarm-armv7:20260805"
+  }
+}

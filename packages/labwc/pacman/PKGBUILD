@@ -1,0 +1,93 @@
+# Orchard: Labwc with the tablet patches in ../patches (touch input fixes, the
+# bottom-edge swipe, session transitions, the overview), in the place of
+# Arch's labwc. The name is Arch's and [orchard] is listed first, so
+# `pacman -S labwc` and `pacman -Syu` take this one; the epoch puts it above
+# whatever Arch build a tablet already has.
+#
+# Based on Arch's recipe (Maintainer: Peter Jung <ptr1337@archlinux.org>,
+# Contributor: Lex Black <autumn-wind@web.de>): the same files and
+# dependencies. The compositor itself is built as omarchy-a built it
+# (release, pinned commit, patches applied without fuzz) and, also as there,
+# has no cap_sys_nice file capability: the tablets' desktop has only been
+# tested without it, and a program with file capabilities runs in secure
+# mode, where the Vulkan loader ignores the environment that selects the GPU
+# driver.
+
+pkgname=labwc
+_commit=97f28877a343e062f3178d201f0248cd9c2610cf
+epoch=1
+pkgver=0.20.2
+pkgrel=1
+pkgdesc='stacking wayland compositor with look and feel from openbox, with OrchardLinux tablet patches'
+url="https://github.com/labwc/labwc"
+arch=('aarch64' 'armv7h')
+license=('GPL-2.0-only')
+options=('!lto' '!debug')
+depends=(
+  cairo
+  glib2
+  glibc
+  libinput
+  libpng
+  librsvg
+  libsfdo
+  libwlroots-0.20.so
+  libxcb
+  libxkbcommon
+  libxml2
+  pango
+  pixman
+  seatd
+  ttf-font
+  wayland
+)
+makedepends=(
+  gettext
+  meson
+  scdoc
+  wayland-protocols
+  xcb-util-wm
+  xorg-xwayland
+)
+optdepends=(
+  "bemenu: default launcher via Alt+F3"
+  "xorg-xwayland: X11 application support"
+)
+_patches=(
+  0001-cancel-super-tap-on-pointer.patch
+  0002-bottom-edge-swipe.patch
+  0003-session-transitions.patch
+  0004-overview.patch
+  0005-title-double-tap.patch
+)
+source=("labwc-${_commit}.tar.gz::https://codeload.github.com/labwc/labwc/tar.gz/${_commit}"
+        "${_patches[@]}")
+sha256sums=('022676dbcbf6b6206b97d7bac8a339c8a0203e3e99693107c15b5a6183e4b0ea'
+            '79b1d2a23a5ec2ffa7b5e479bf29af10f72f5f960e019e62d998a73cc25a2264'
+            '6ad9344f373526841560b235c32bc157a3af550890f125a3e6f9deb00ed9202e'
+            '72c7f10dcb13557d92a0c276887f35edfdfb8db645196cc98f0514150de6eca9'
+            '0af471fa5fdb9a8fbf5824a0ab4a28c44f3a2e740104e8079df0e8355b083c75'
+            '0966d5b303c6230eb429154f0e24708cc3a5421cc7f02a8f81239e660456da67')
+
+prepare() {
+  local patch
+  for patch in "${_patches[@]}"; do
+    patch --batch --fuzz=0 -d "labwc-${_commit}" -p1 -i "${srcdir}/${patch}"
+  done
+}
+
+build() {
+  # Not arch-meson: the compositor is built as a release, as the tablets have
+  # run it. Man pages, labnag and the session unit only add Arch's files.
+  meson setup "labwc-${_commit}" build --prefix=/usr --buildtype=release --wrap-mode=nofallback \
+    -Dman-pages=enabled -Dlabnag=enabled -Dxwayland=enabled -Dnls=enabled -Dsystemd-session=enabled
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "${pkgdir}"
+  "${pkgdir}/usr/bin/labwc" --version | grep -q "${pkgver}"
+  install -Dm 644 "labwc-${_commit}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  # The changes to upstream's source, beside its license.
+  install -Dm 644 -t "${pkgdir}/usr/share/licenses/${pkgname}/patches" "${_patches[@]/#/${srcdir}/}"
+}

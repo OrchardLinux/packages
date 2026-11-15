@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Inside the build container (ci/build-package starts it): build one package
+# with makepkg, as an unprivileged user, against a fully updated Arch.
+#
+#   /repo    this repository, read-only
+#   /out     receives the package
+#   /ccache  the compiler cache, when the package uses one
+set -euo pipefail
+package=$1
+version=$2
+: "${ORCHARD_ARCH:?}"
+bash /repo/ci/prepare-pacman
+tools=(base-devel git)
+[[ ! -d /ccache ]] || tools+=(ccache)
+pacman-download -S --noconfirm --needed "${tools[@]}"
+pacman -S --noconfirm --needed "${tools[@]}"
+
+# One flat directory, as makepkg wants it: the recipe, the patches, and the
+# files a package keeps beside them.
+source=/repo/packages/$package
+build=/build/$package
+mkdir -p "$build"
+find "$source" -maxdepth 1 -type f ! -name source.json -exec cp -t "$build" {} +
+[[ ! -d $source/patches ]] || cp "$source"/patches/* "$build/"
+cp "$source"/pacman/* "$build/"
+useradd --create-home builder
+chown -R builder: "$build" /out
+[[ ! -d /ccache ]] || chown -R builder: /ccache
+
+sed -i "s/^#\?MAKEFLAGS=.*/MAKEFLAGS=\"-j$(nproc)\"/; s/^PKGEXT=.*/PKGEXT='.pkg.tar.zst'/" /etc/makepkg.conf
+[[ ! -d /ccache ]] || sed -i '/^BUILDENV=/s/!ccache/ccache/' /etc/makepkg.conf
+# No separate -debug packages: the repository carries what tablets install.
+sed -i '/^OPTIONS=/{s/!debug/debug/; s/\bdebug\b/!debug/}' /etc/makepkg.conf
+as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER='OrchardLinux packages (CI)'
+  CCACHE_DIR=/ccache CCACHE_BASEDIR=/build CCACHE_NOHASHDIR=1 CCACHE_MAXSIZE=2G)
+cd "$build"
+test "$("${as_builder[@]}" bash -c 'source /etc/makepkg.conf; echo "$CARCH"')" = "$ORCHARD_ARCH"
+
+# What the recipe needs to build and to run, from Arch's signed packages.
+mapfile -t needs < <("${as_builder[@]}" makepkg --printsrcinfo |
+  sed -n 's/^\t\(make\|check\)\?depends = //p' | sort -u)
+if (( ${#needs[@]} )); then
+  pacman-download -S --noconfirm --needed --asdeps "${needs[@]}"
+  pacman -S --noconfirm --needed --asdeps "${needs[@]}"
+fi
+
+[[ ! -d /ccache ]] || "${as_builder[@]}" ccache --zero-stats >/dev/null
+started=$(date +%s)
+"${as_builder[@]}" makepkg --noconfirm
+if [[ -d /ccache ]]; then
+  # Keep only what this build used, so the saved cache stays one build large.
+  "${as_builder[@]}" ccache --evict-older-than "$(( $(date +%s) - started + 60 ))s" >/dev/null
+  "${as_builder[@]}" ccache --show-stats
+fi
+
+# Exactly the planned package, for this architecture.
+file=$(ls /out/"$package"-*.pkg.tar.zst)
+info=$(bsdtar -xOf "$file" .PKGINFO)
+grep -qx "pkgname = $package" <<<"$info"
+grep -qx "pkgver = $version" <<<"$info"
+grep -qx "arch = $ORCHARD_ARCH" <<<"$info"
+# GitHub stores neither an artifact nor a release file with ':' in its name
+# (an epoch's): the file is named with '.', and the index names that file.
+name=$(basename "$file")
+[[ $name == "${name//:/.}" ]] || mv "$file" "/out/${name//:/.}"
+echo "Built ${name//:/.} ($(stat -c %s "/out/${name//:/.}") bytes)"

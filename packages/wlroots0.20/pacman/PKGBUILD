@@ -1,16 +1,19 @@
 # Maintainer: Robin Candau <antiz@archlinux.org>
-# omarchy-a: Arch's wlroots0.20 with fast rotated pixman compositing and a
+# Orchard: Arch's wlroots0.20 with fast rotated pixman compositing and a
 # GLES2 renderer that samples shared-memory buffers in place, until wlroots
-# has them (see the patches). pkgrel above Arch Linux ARM's rebuilds.
+# has them (see ../patches). The name is Arch's and [orchard] is listed first,
+# so pacman takes this one; the epoch puts it above whatever Arch build a
+# tablet already has.
 
 pkgname=wlroots0.20
 _pkgname=wlroots
+epoch=1
 pkgver=0.20.2
-pkgrel=1.6
+pkgrel=1
 pkgdesc="Modular Wayland compositor library"
 url="https://gitlab.freedesktop.org/wlroots/wlroots"
 license=('MIT')
-arch=('x86_64' 'aarch64' 'armv7h')
+arch=('aarch64' 'armv7h')
 depends=('glibc' 'libdisplay-info.so' 'libdrm' 'libglvnd' 'libinput' 'liblcms2.so' 'libliftoff.so' 'libpixman-1.so'
          'libseat.so' 'libudev.so' 'libvulkan.so' 'libwayland-client.so' 'libwayland-server.so' 'libxcb' 'libxkbcommon.so'
          'wayland-protocols' 'opengl-driver' 'xcb-util-errors' 'xcb-util-renderutil' 'xcb-util-wm')

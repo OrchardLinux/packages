@@ -1,4 +1,5 @@
-# Omarchy A: ARMv7 build of Omacalc's pinned, MIT-licensed source.
+# ARMv7 build of Omacalc's pinned, MIT-licensed source. 64-bit tablets take
+# Omacalc from upstream Omarchy's repository, which has no ARMv7 build.
 # Corresponding source: omacom/omacalc v0.3.1, commit 573d7106f5c6c0225864eb8634ae37ddcb657f63.
 pkgname=omacalc
 pkgver=0.3.1
@@ -23,7 +24,8 @@ build() {
 
 check() {
     cd "$srcdir/omacalc-$_commit"
-    sh bin/test
+    # The tests are Qt Quick tests; the build has no display.
+    QT_QPA_PLATFORM=offscreen sh bin/test
 }
 
 package() {

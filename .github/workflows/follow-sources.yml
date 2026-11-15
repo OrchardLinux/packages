@@ -1,0 +1,77 @@
+name: Follow sources
+# Keeps the packages current without anyone bumping a pin by hand:
+#
+# - a source repository that a package tracks (packages/NAME/source.json,
+#   "track") moved: the pin moves to its newest commit, is committed to main,
+#   and the build builds that package. Found by polling, and at once when the
+#   source repository sends `source-updated` (repository_dispatch with
+#   client_payload {"repo": "OrchardLinux/mesa", "sha": "..."}; that needs a
+#   token in the sending repository, which does not exist yet);
+# - Arch moved a library a published package is locked to (LLVM under Mesa):
+#   the package's pkgrel is raised and it is built again against today's Arch.
+on:
+  schedule:
+    - cron: '7,27,47 * * * *'
+    - cron: '37 */6 * * *'
+  repository_dispatch:
+    types: [source-updated]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Only this package's pin
+        required: false
+      commit:
+        description: Move to this commit of the tracked branch instead of its newest
+        required: false
+      installable:
+        description: Check instead that the published packages still install
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: follow-sources
+  cancel-in-progress: false
+jobs:
+  pins:
+    if: github.event.schedule != '37 */6 * * *' && !inputs.installable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENT_REPOSITORY: ${{ github.event.client_payload.repo }}
+          SENT_COMMIT: ${{ github.event.client_payload.sha }}
+          PACKAGE: ${{ inputs.package }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          python3 tools/pkgrepo bump ${SENT_REPOSITORY:+--repository "$SENT_REPOSITORY"} \
+            ${PACKAGE:+--package "$PACKAGE"} ${SENT_COMMIT:+--commit "$SENT_COMMIT"} ${COMMIT:+--commit "$COMMIT"}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          MOVED: ${{ steps.bump.outputs.moved }}
+        run: ci/commit-and-build "${MOVED// /, }: follow the source's newest commit"
+  installable:
+    if: github.event.schedule == '37 */6 * * *' || inputs.installable
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve every published package against today's Arch
+        run: |
+          mkdir -p out
+          ci/container aarch64 -v "$PWD:/repo:ro" -v "$PWD/out:/out" \
+            -e ORCHARD_SERVER_BASE="https://github.com/$GITHUB_REPOSITORY/releases/download" \
+            -- bash /repo/ci/container-installable
+      - name: Build again what no longer installs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t broken < <(sort -u out/broken)
+          (( ${#broken[@]} )) || exit 0
+          python3 tools/pkgrepo rebuild --published-only "${broken[@]}"
+          names="${broken[*]}"
+          ci/commit-and-build "${names// /, }: build again for Arch's current libraries"

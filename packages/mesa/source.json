@@ -1,0 +1,9 @@
+{
+  "repository": "OrchardLinux/mesa",
+  "track": "main",
+  "version": "27.0.0-devel",
+  "commit": "2c1aa767d8d8836739260177144716271e05f686",
+  "revision": 232935,
+  "url": "https://github.com/OrchardLinux/mesa/archive/2c1aa767d8d8836739260177144716271e05f686.tar.gz",
+  "sha256": "e6a6481bcbe736342146b8000725e739ebf389384d3a9fe3ae36def2e4c6cd2a"
+}

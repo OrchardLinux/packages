@@ -17,7 +17,6 @@
 #     where the last one stopped, so slow progress is never thrown away.
 # Downloads only, never an install: interrupting an install could leave a
 # half-installed root.
-# desktop/pacman-download is a copy for the desktop builders' build context.
 #
 #   pacman-download PACMAN-ARGS...   e.g. pacman-download -Sy --noconfirm --needed python
 set -uo pipefail

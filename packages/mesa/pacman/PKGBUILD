@@ -1,10 +1,10 @@
-# omarchy-a: Mesa from OrchardLinux's fork, in the place of Arch's mesa package
-# on every 64-bit board. Two builds of one source:
+# Mesa from OrchardLinux's fork, in the place of Arch's mesa package on every
+# 64-bit board. Two builds of one source:
 #
 # - the Vulkan driver for the Apple PowerVR GPUs orchard's powervr kernel
 #   driver runs (the A10's and the A9's), built as it was before this package
 #   took over OpenGL;
-# - OpenGL, GLES, EGL, GBM and GLX with the drivers this image uses: Zink (the
+# - OpenGL, GLES, EGL, GBM and GLX with the drivers the tablets use: Zink (the
 #   GPU desktop, on the Vulkan driver above) and llvmpipe and softpipe
 #   (software OpenGL, on every board and wherever the GPU is not used), built
 #   as a release like Arch's.
@@ -15,15 +15,22 @@
 # textures transcoded to ETC2). Arch's drivers for other hardware and its
 # VA-API drivers are left out: no board has that hardware.
 #
-# With it gpu-probe, the login session's test that this stack draws on the
+# With it gpu-probe, a login session's test that this stack draws on the
 # board it runs on. The kernel side is orchard's.
+#
+# The name is Arch's, so that `pacman -S mesa` and `pacman -Syu` take this
+# package from [orchard], which is listed first. The epoch is Arch's too: what
+# depends on a mesa version, and a tablet that still has Arch's mesa, both
+# compare against 1:. tools/pkgrepo bump writes _commit, pkgver, pkgrel and the
+# archive's checksum when OrchardLinux/mesa moves (see ../source.json).
 
-pkgname=mesa-orchard
+pkgname=mesa
 _commit=2c1aa767d8d8836739260177144716271e05f686
-pkgver=27.0.0.dev.2c1aa767d8d
+epoch=1
+# Mesa's version, the commit's number on the fork's main branch (so that a
+# newer commit is a newer package), and the commit.
+pkgver=27.0.0.dev.r232935.2c1aa767d8d
 pkgrel=1
-# Arch's mesa has epoch 1; what this package provides in its place carries it too.
-_provided="1:${pkgver}-${pkgrel}"
 pkgdesc="Mesa from the OrchardLinux fork: OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and the desktop's GPU probe"
 url="https://github.com/OrchardLinux/mesa"
 license=('MIT')
@@ -37,10 +44,11 @@ depends=('expat' 'gcc-libs' 'glibc' 'libdisplay-info' 'libdrm' 'libglvnd' 'libLL
 makedepends=('bison' 'clang' 'flex' 'glslang' 'libclc' 'libxfixes' 'libxkbcommon' 'libxrandr' 'llvm' 'meson' 'ninja'
              'pkgconf' 'python-mako' 'python-packaging' 'python-ply' 'python-yaml' 'spirv-llvm-translator'
              'vulkan-headers' 'wayland-protocols' 'xorgproto')
-provides=("mesa=${_provided}" "mesa-libgl=${_provided}" 'opengl-driver' 'vulkan-driver'
-          "vulkan-powervr-orchard=${pkgver}-${pkgrel}")
-conflicts=('mesa' 'mesa-libgl' 'vulkan-powervr' 'vulkan-powervr-orchard')
-replaces=('mesa' 'vulkan-powervr-orchard')
+# mesa-orchard: this package's name while omarchy-a built it.
+provides=("mesa-libgl=${epoch}:${pkgver}-${pkgrel}" 'opengl-driver' 'vulkan-driver'
+          "mesa-orchard=${pkgver}-${pkgrel}" "vulkan-powervr-orchard=${pkgver}-${pkgrel}")
+conflicts=('mesa-libgl' 'mesa-orchard' 'vulkan-powervr' 'vulkan-powervr-orchard')
+replaces=('mesa-orchard' 'vulkan-powervr-orchard')
 source=("mesa-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz" gpu-probe.c)
 sha256sums=('e6a6481bcbe736342146b8000725e739ebf389384d3a9fe3ae36def2e4c6cd2a'
             '85a82faaf046de658e139df0f185793a9aca857129a7c90c76aaf98d74152633')
@@ -89,6 +97,9 @@ package() {
 		build-vulkan/src/imagination/vulkan/powervr_mesa_icd.*.json > powervr_mesa_icd.json
 	grep -q '"library_path": "/usr/lib/libvulkan_powervr_mesa.so"' powervr_mesa_icd.json
 	install -Dm 644 powervr_mesa_icd.json "${pkgdir}/usr/share/vulkan/icd.d/powervr_mesa_icd.json"
-	install -Dm 755 gpu-probe "${pkgdir}/usr/lib/omarchy-a/gpu-probe"
+	install -Dm 755 gpu-probe "${pkgdir}/usr/lib/orchard/gpu-probe"
+	# Where omarchy-a's login session looks for it.
+	install -d "${pkgdir}/usr/lib/omarchy-a"
+	ln -s ../orchard/gpu-probe "${pkgdir}/usr/lib/omarchy-a/gpu-probe"
 	install -Dm 644 "mesa-${_commit}/docs/license.rst" "${pkgdir}/usr/share/licenses/${pkgname}/license.rst"
 }

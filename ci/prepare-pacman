@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Inside an Arch Linux ARM container: make pacman usable there and bring the
+# system fully up to date, so that what is built or installed next meets
+# today's Arch libraries (an LLVM that is no longer current must not be
+# linked against).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+: "${ORCHARD_ARCH:?}"
+sed -i '/^DownloadUser = /d; /^DisableSandbox/d; /^CheckSpace/a DisableSandboxFilesystem\nDisableSandboxSyscalls' /etc/pacman.conf
+# The kernel is 64-bit in every container; pacman must not go by it.
+sed -i "s/^#\?Architecture *=.*/Architecture = $ORCHARD_ARCH/" /etc/pacman.conf
+# Arch Linux ARM mirrors are slow per connection: ten downloads at a time.
+sed -i 's/^#\?ParallelDownloads.*/ParallelDownloads = 10/' /etc/pacman.conf
+# pacman's own stall timeout (nothing for 10 s: next mirror) must stay on.
+sed -i '/^DisableDownloadTimeout/d' /etc/pacman.conf
+install -m 755 "$here/rank-mirrors" "$here/pacman-download" /usr/local/bin/
+rank-mirrors
+pacman-key --init
+pacman-key --populate archlinuxarm
+# The base image's kernel and firmware are not needed: never download them.
+mapfile -t unneeded < <(pacman -Qq | grep -E '^(linux-aarch64|linux-armv7|linux-firmware.*)$')
+(( ${#unneeded[@]} == 0 )) || pacman -Rdd --noconfirm "${unneeded[@]}"
+pacman-download -Syu --noconfirm
+pacman -Su --noconfirm

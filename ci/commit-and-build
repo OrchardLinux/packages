@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# In a workflow: commit what a step changed under packages/ to main and start
+# the build, which builds exactly the packages whose version is now new.
+# (A push made with the workflow's own token starts no workflow by itself.)
+#
+#   ci/commit-and-build MESSAGE
+set -euo pipefail
+message=$1
+if git diff --quiet -- packages; then
+  echo 'Nothing changed.'
+  exit 0
+fi
+git add packages
+git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+  commit -q -m "$message"
+git push origin HEAD:main || { git pull --rebase origin main && git push origin HEAD:main; }
+gh workflow run build.yml --ref main

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Add built packages to the published pacman repository `orchard`: the files of
+# the GitHub release repo-ARCH. The only place that writes the index; the
+# workflow runs one publish at a time.
+#
+#   ci/publish ARTIFACTS    ARTIFACTS/package-ARCH-NAME/NAME-VERSION-ARCH.pkg.tar.zst
+#
+# Packages go up first and the index last, and the files of the index before
+# this one stay: a tablet that read the old index still finds its packages.
+#
+# Signing: when ORCHARD_SIGNING_KEY holds the armored secret signing subkey
+# (docs/signing.md), every package and the index are signed with it. Without
+# it the repository is unsigned.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+repo=$(dirname "$here")
+artifacts=$(cd "$1" && pwd)
+: "${GH_REPO:=${GITHUB_REPOSITORY:?}}"
+export GH_REPO
+
+for arch in aarch64 armv7h; do
+  shopt -s nullglob
+  packages=("$artifacts"/package-"$arch"-*/*.pkg.tar.zst)
+  shopt -u nullglob
+  (( ${#packages[@]} )) || continue
+  tag=repo-$arch
+  if ! gh release view "$tag" >/dev/null 2>&1; then
+    gh release create "$tag" --latest=false --title "Package repository: $arch" --notes \
+"The pacman repository \`orchard\` for $arch. Not a release to download by hand: pacman reads it.
+
+    [orchard]
+    Server = https://github.com/$GH_REPO/releases/download/repo-\$arch
+
+See the README for the whole pacman.conf entry."
+  fi
+  work=$(mktemp -d)
+  mkdir "$work/old" "$work/new"
+  for file in orchard.db orchard.files built.json; do
+    gh release download "$tag" --pattern "$file" --dir "$work/old" 2>/dev/null || true
+  done
+  [[ ! -f $work/old/orchard.db ]] || cp "$work/old/orchard.db" "$work/new/orchard.db.tar.gz"
+  [[ ! -f $work/old/orchard.files ]] || cp "$work/old/orchard.files" "$work/new/orchard.files.tar.gz"
+  [[ ! -f $work/old/built.json ]] || cp "$work/old/built.json" "$work/new/built.json"
+  cp "${packages[@]}" "$work/new/"
+  names=()
+  for package in "${packages[@]}"; do
+    names+=("$(bsdtar -xOf "$package" .PKGINFO | sed -n 's/^pkgname = //p')")
+  done
+
+  sign=()
+  if [[ -n ${ORCHARD_SIGNING_KEY:-} ]]; then
+    printf '%s\n' "$ORCHARD_SIGNING_KEY" > "$work/new/.signing-key"
+    sign=(--sign)
+  fi
+  # repo-add is pacman's; any architecture's container has it.
+  "$here/container" aarch64 -v "$work/new:/work" -w /work -- bash -euc '
+    if [[ -f .signing-key ]]; then
+      export GNUPGHOME=$(mktemp -d)
+      gpg --batch --import .signing-key
+      rm .signing-key
+      for package in *.pkg.tar.zst; do gpg --batch --yes --detach-sign --no-armor "$package"; done
+    fi
+    repo-add "$@" orchard.db.tar.gz *.pkg.tar.zst
+  ' repo-add "${sign[@]}"
+  sudo chown -R "$(id -u):$(id -g)" "$work/new"
+  python3 "$repo/tools/pkgrepo" record "$work/new/built.json" "${names[@]}"
+
+  shopt -s nullglob
+  gh release upload "$tag" --clobber "$work"/new/*.pkg.tar.zst "$work"/new/*.pkg.tar.zst.sig
+  # The index under the names pacman asks for.
+  mkdir "$work/index"
+  cp "$work/new/orchard.db.tar.gz" "$work/index/orchard.db"
+  cp "$work/new/orchard.files.tar.gz" "$work/index/orchard.files"
+  for signature in "$work"/new/orchard.{db,files}.tar.gz.sig; do
+    name=$(basename "$signature")
+    cp "$signature" "$work/index/${name/.tar.gz/}"
+  done
+  cp "$work/new/built.json" "$work/index/"
+  gh release upload "$tag" --clobber "$work"/index/*
+  shopt -u nullglob
+
+  mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name')
+  mapfile -t stale < <(python3 "$repo/tools/pkgrepo" prune \
+    --index "$work/index/orchard.db" "$work/old/orchard.db" --assets "${assets[@]}")
+  for asset in "${stale[@]}"; do
+    gh release delete-asset "$tag" "$asset" --yes
+  done
+  echo "Published to $tag: ${names[*]}"
+  rm -rf "$work"
+done

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Inside a fresh Arch Linux ARM container: what a tablet does. Arch's own
+# labwc, wlroots0.20 and mesa are installed first; then [orchard] is listed
+# before Arch's repositories and `pacman -Syu` has to replace them with ours.
+# After that every package of the repository installs and pacman finds
+# nothing wrong with the result.
+set -euo pipefail
+: "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER:?}"
+bash /repo/ci/prepare-pacman
+replaced=(labwc wlroots0.20 mesa)
+pacman-download -S --noconfirm --needed "${replaced[@]}"
+pacman -S --noconfirm --needed "${replaced[@]}"
+
+# Unsigned for now: see docs/signing.md for the entry once the key exists.
+sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER\n" /etc/pacman.conf
+pacman -Syu --noconfirm
+mapfile -t ours < <(pacman -Slq orchard)
+(( ${#ours[@]} ))
+for name in "${replaced[@]}"; do
+  [[ " ${ours[*]} " != *" $name "* ]] || pacman -Sl orchard | grep "^orchard $name .*\[installed\]$" >/dev/null
+done
+pacman -S --noconfirm --needed "${ours[@]}"
+pacman -Sl orchard
+# Every package installed, at the repository's version.
+[[ $(pacman -Sl orchard | grep -c '\[installed\]$') == "${#ours[@]}" ]]
+# `pacman -S NAME` keeps taking ours.
+pacman -S --print "${ours[@]}" | grep -v "^${ORCHARD_SERVER}/" && { echo 'pacman took a package elsewhere' >&2; exit 1; }
+pacman -Dk
+pacman -Qk "${ours[@]}"
+[[ " ${ours[*]} " != *" labwc "* ]] || { [[ $(pacman -Qoq /usr/bin/labwc) == labwc ]]; labwc --version; }
+[[ " ${ours[*]} " != *" mesa "* ]] ||
+  [[ $(pacman -Qoq /usr/lib/libEGL_mesa.so.0 /usr/lib/libgbm.so.1 /usr/lib/libvulkan_powervr_mesa.so /usr/lib/orchard/gpu-probe | sort -u) == mesa ]]
+echo "Verified $ORCHARD_ARCH: ${ours[*]}"

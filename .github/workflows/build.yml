@@ -1,0 +1,122 @@
+name: Build and publish
+# Builds the packages whose version the published repository does not have yet,
+# and nothing else: a push that changes no package version builds nothing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Only this package (default: every package that is not published)
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+      arches: ${{ steps.plan.outputs.arches }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -v
+      - id: plan
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: python3 tools/pkgrepo plan ${PACKAGE:+--package "$PACKAGE"}
+  build:
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    name: ${{ matrix.package }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The compiler cache of the package's last build: only what changed in
+      # its source compiles again.
+      - uses: actions/cache/restore@v4
+        if: matrix.ccache
+        id: ccache
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.package }}-${{ matrix.arch }}-${{ hashFiles(format('packages/{0}/**', matrix.package)) }}
+          restore-keys: ccache-${{ matrix.package }}-${{ matrix.arch }}-
+      - name: Build
+        env:
+          CCACHE: ${{ matrix.ccache && '1' || '' }}
+          PACKAGE: ${{ matrix.package }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ matrix.version }}
+        run: ci/build-package "$PACKAGE" "$ARCH" "$VERSION"
+      - uses: actions/cache/save@v4
+        if: matrix.ccache && steps.ccache.outputs.cache-hit != 'true'
+        with:
+          path: .ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.arch }}-${{ matrix.package }}
+          path: out/*.pkg.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
+  publish:
+    # What built is published even when another package failed.
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.outputs.any == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    # One writer of the index at a time, across all runs.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: artifacts
+      - id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Not set yet: the repository is unsigned until the key exists (docs/signing.md).
+          ORCHARD_SIGNING_KEY: ${{ secrets.ORCHARD_SIGNING_KEY }}
+        run: |
+          mkdir -p artifacts
+          ci/publish artifacts
+          ls artifacts | grep -q . && echo published=true >> "$GITHUB_OUTPUT" || true
+  verify:
+    # A fresh Arch Linux ARM system takes every package from the published repository.
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.outputs.published == 'true' }}
+    name: install (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.plan.outputs.arches) }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: ci/verify-install "${{ matrix.arch }}"

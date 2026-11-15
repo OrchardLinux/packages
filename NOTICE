@@ -1,0 +1,31 @@
+Default license of this repository's own files (recipes, scripts, workflows): GPL-2.0-or-later (LICENSE).
+
+Where things came from
+
+The recipes, patches and the two pacman helpers were moved here from
+OrchardLinux/omarchy-a (commit aebcf01, 2026-11-15), where they were written.
+Their history up to then is in that repository.
+
+packages/mesa: Mesa, MIT; source https://github.com/OrchardLinux/mesa, license in the package.
+  Recipe and gpu-probe.c (MIT): Henrik Klee.
+packages/wlroots0.20: wlroots, MIT.
+  Recipe: Arch Linux's wlroots0.20 PKGBUILD (Maintainer: Robin Candau), adapted by Henrik Klee;
+  ARMv7 by Shayne Legault.
+  patches/0001, 0002: Henrik Klee (authorship in each patch's header).
+packages/labwc: Labwc, GPL-2.0-only.
+  Recipe: after Arch Linux's labwc PKGBUILD (Maintainer: Peter Jung, Contributor: Lex Black) and
+  omarchy-a's desktop/build-labwc (Henrik Klee; ARMv7 by Shayne Legault).
+  patches/0001 to 0004: Henrik Klee.
+  patches/0005: Berkay Kösebay (omarchy-a PR #46).
+packages/libva-v4l2-request: libva-v4l2_request, GPL-3.0-only; Ondrej Jirman and contributors,
+  https://xff.cz/git/libva-v4l2_request. The archive beside the recipe is that repository's tree at
+  commit cac6ece0e23ac1f944dd3af266680aff0c3184df (git archive); COPYING is in it and in the package.
+  Recipe: Henrik Klee.
+packages/omafox: Omafox, MIT; https://github.com/cover/omafox.
+  Recipe and install script: upstream's (Maintainer: Fabio Cantoni); ARMv7 by Shayne Legault.
+packages/omacalc: Omacalc, MIT, with a font under OFL-1.1; https://github.com/omacom/omacalc.
+  Recipe: Shayne Legault.
+ci/rank-mirrors, ci/pacman-download: Henrik Klee, from omarchy-a.
+
+The armv7h build container is Arch Linux ARM's official root archive of 2026-08-05, fetched from the
+copy in OrchardLinux/omarchy-a's releases and checked against the SHA-256 in ci/containers.json.

@@ -7,7 +7,8 @@
 # which redirects to one near here) is always last, so even a short ranking
 # leaves pacman somewhere to go. Without any answer the current list stays.
 # The Server lines come last and together: pacman-download rotates them.
-# desktop/rank-mirrors is a copy for the desktop builders' build context.
+# RANK_MIRRORS_ARCH names the architecture when the machine is not the target
+# (32-bit containers on a 64-bit kernel).
 #
 #   rank-mirrors [MIRRORLIST]     (default /etc/pacman.d/mirrorlist)
 set -uo pipefail
@@ -23,8 +24,8 @@ candidates=(
   hu.mirror.archlinuxarm.org tw.mirror.archlinuxarm.org tw2.mirror.archlinuxarm.org
   mirrors.tuna.tsinghua.edu.cn/archlinuxarm mirrors.ustc.edu.cn/archlinuxarm
 )
-arch=$(uname -m)
-case "$arch" in armv7l|armv7|armhf) arch=armv7h;; esac
+arch=${RANK_MIRRORS_ARCH:-$(uname -m)}
+case "$arch" in armv7l|armv8l|armv7|armhf) arch=armv7h;; esac
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
@@ -48,7 +49,7 @@ fi
 fallback=mirror.archlinuxarm.org
 mirrors=()
 {
-  echo "# Fastest Arch Linux ARM mirrors from here at $(date -u +%FT%TZ) (system/rank-mirrors)"
+  echo "# Fastest Arch Linux ARM mirrors from here at $(date -u +%FT%TZ) (ci/rank-mirrors)"
   for line in "${ranked[@]}"; do
     read -r bps mirror <<<"$line"
     echo "#   $mirror: $((bps / 1024)) KiB/s"

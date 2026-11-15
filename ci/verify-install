@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Install the published repository of one architecture in a fresh container.
+#
+#   ci/verify-install ARCH
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+arch=$1
+server=https://github.com/${GITHUB_REPOSITORY:-OrchardLinux/packages}/releases/download/repo-$arch
+"$here/container" "$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$server" -- bash /repo/ci/container-verify
