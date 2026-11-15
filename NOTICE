@@ -25,6 +25,12 @@ packages/omafox: Omafox, MIT; https://github.com/cover/omafox.
   Recipe and install script: upstream's (Maintainer: Fabio Cantoni); ARMv7 by Shayne Legault.
 packages/omacalc: Omacalc, MIT, with a font under OFL-1.1; https://github.com/omacom/omacalc.
   Recipe: Shayne Legault.
+packages/omactivity: Omactivity, MIT; https://github.com/OrchardLinux/omactivity.
+  Recipe: that repository's pkgbuild/PKGBUILD (Henrik Klee).
+packages/folio-touch: Folio, MIT; David Heinemeier Hansson and contributors, https://github.com/omacom/folio,
+  with the touch mode of https://github.com/OrchardLinux/folio (Henrik Klee).
+  Recipe: upstream Omarchy's (omacom/omarchy-pkgs pkgbuilds/folio, Maintainer: David Heinemeier Hansson)
+  as OrchardLinux/folio's omarchy-a branch packaged it (pkgbuild/omarchy-a, Henrik Klee).
 ci/rank-mirrors, ci/pacman-download: Henrik Klee, from omarchy-a.
 
 The armv7h build container is Arch Linux ARM's official root archive of 2026-08-05, fetched from the

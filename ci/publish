@@ -73,9 +73,8 @@ See the README for the whole pacman.conf entry."
   mkdir "$work/index"
   cp "$work/new/orchard.db.tar.gz" "$work/index/orchard.db"
   cp "$work/new/orchard.files.tar.gz" "$work/index/orchard.files"
-  for signature in "$work"/new/orchard.{db,files}.tar.gz.sig; do
-    name=$(basename "$signature")
-    cp "$signature" "$work/index/${name/.tar.gz/}"
+  for name in orchard.db orchard.files; do
+    [[ ! -f $work/new/$name.tar.gz.sig ]] || cp "$work/new/$name.tar.gz.sig" "$work/index/$name.sig"
   done
   cp "$work/new/built.json" "$work/index/"
   gh release upload "$tag" --clobber "$work"/index/*

@@ -15,6 +15,10 @@ tools=(base-devel git)
 pacman-download -S --noconfirm --needed "${tools[@]}"
 pacman -S --noconfirm --needed "${tools[@]}"
 
+# A UTF-8 locale: some packages' tests need one (Folio's).
+sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
+locale-gen >/dev/null
+
 # One flat directory, as makepkg wants it: the recipe, the patches, and the
 # files a package keeps beside them.
 source=/repo/packages/$package

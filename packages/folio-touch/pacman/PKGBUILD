@@ -1,0 +1,96 @@
+# Files: Folio, Omarchy's file manager, with the touch mode of
+# OrchardLinux/folio's touch-mode branch (a fork of omacom/folio kept ahead of
+# upstream). The recipe is upstream Omarchy's (omacom/omarchy-pkgs
+# pkgbuilds/folio, Maintainer: David Heinemeier Hansson) as that fork packaged
+# it for Omarchy A: under the name folio-touch, which provides folio and
+# conflicts with it, so that an update does not swap this build for upstream
+# Omarchy's folio, which has no touch mode yet, and with the tests run.
+#
+# It builds the pinned commit's archive. tools/pkgrepo bump writes _commit,
+# pkgver, pkgrel and the archive's checksum when the branch moves; the version
+# is the newest upstream release the commit contains (see ../source.json).
+# package() takes the icon and desktop entry from share/ (Folio 0.4 on) or
+# pkgbuild/ (before), and the plugins where the source has them, so the same
+# recipe builds the branch before and after its rebase onto 0.4.
+
+pkgname=folio-touch
+_commit=f791569d306b67acbff83f58bacb7e0e82840bf8
+pkgver=0.4.0.402.gf791569d306
+pkgrel=1
+pkgdesc="Omarchy's file manager: quiet, keyboard-first, and following the theme; with touch mode"
+arch=('aarch64' 'armv7h')
+url='https://github.com/OrchardLinux/folio'
+license=('MIT')
+depends=(
+  'glib2'
+  'hicolor-icon-theme'
+  'libarchive'
+  'qt6-base'
+  'qt6-declarative'
+  'qt6-imageformats'
+  'qt6-multimedia'
+  'qt6-svg'
+  'qt6-wayland'
+  'xdg-utils'
+  'zlib'
+)
+optdepends=(
+  'qt6-webengine: PDF previews (Qt PDF)'
+  'ffmpegthumbnailer: video thumbnails'
+  'papers: PDF thumbnails'
+  'poppler: PDF thumbnails without Papers'
+  'glycin: HEIC, JPEG XL and other image thumbnails'
+  'gvfs: browsing tailnet machines over SFTP'
+  'tailscale: listing tailnet machines and Taildrop'
+  'jq: the Tailscale plugin, which reads tailscale status with it'
+  'dropbox-cli: Dropbox sync status and share links'
+  'localsend: sharing with nearby devices'
+  'xdg-terminal-exec: Open Terminal Here'
+)
+makedepends=('cmake')
+options=('!debug')
+# Upstream's, and what the fork's package build installed to run the tests.
+checkdepends=('dbus' 'jq' 'poppler' 'ttf-dejavu')
+provides=('folio')
+conflicts=('folio')
+source=("folio-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz")
+sha256sums=('f9c16db01b5aeda5baf2577b91b525a03937ed1fe616c341357fa6ed879d52ed')
+
+build() {
+  cd "folio-${_commit}"
+  ./bin/build
+}
+
+check() {
+  cd "folio-${_commit}"
+  # As upstream's CI runs them: a UTF-8 locale and a session bus (and, as
+  # makepkg does, an unprivileged user in a directory on a real file system).
+  LANG=en_US.UTF-8 dbus-run-session -- bin/test
+}
+
+package() {
+  cd "folio-${_commit}"
+  local share=share
+  [[ -d share ]] || share=pkgbuild
+
+  install -Dm755 build/folio "${pkgdir}/usr/bin/folio"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "${share}/folio.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/folio.svg"
+  install -Dm644 "${share}/folio.desktop" "${pkgdir}/usr/share/applications/folio.desktop"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+
+  # Folio 0.4 on: the bundled plugins (Tailscale, Dropbox, LocalSend), their
+  # commands still executable. The build has no install rules for them.
+  if [[ -d plugins ]]; then
+    install -Dm644 docs/plugins.md "${pkgdir}/usr/share/doc/${pkgname}/plugins.md"
+    local file mode
+    find plugins -type f | while read -r file; do
+      mode=644
+      [[ ! -x ${file} ]] || mode=755
+      install -Dm${mode} "${file}" "${pkgdir}/usr/share/folio/${file}"
+    done
+    for file in tailscale dropbox localsend; do
+      [[ -d ${pkgdir}/usr/share/folio/plugins/${file} ]]
+    done
+  fi
+}

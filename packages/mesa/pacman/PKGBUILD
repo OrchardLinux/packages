@@ -29,7 +29,7 @@ _commit=2c1aa767d8d8836739260177144716271e05f686
 epoch=1
 # Mesa's version, the commit's number on the fork's main branch (so that a
 # newer commit is a newer package), and the commit.
-pkgver=27.0.0.dev.r232935.2c1aa767d8d
+pkgver=27.0.0.dev.232935.g2c1aa767d8d
 pkgrel=1
 pkgdesc="Mesa from the OrchardLinux fork: OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and the desktop's GPU probe"
 url="https://github.com/OrchardLinux/mesa"

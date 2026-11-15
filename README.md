@@ -21,6 +21,8 @@ published repository; nothing is built for one yet.
 | `wlroots0.20` | yes | yes | Arch's wlroots 0.20 with fast rotated software compositing and a GLES2 renderer that reads shared-memory buffers in place. Replaces Arch's `wlroots0.20`. |
 | `labwc` | yes | yes | Labwc with the tablet patches: touch input fixes, bottom-edge swipe, session transitions, the overview. Replaces Arch's `labwc`. |
 | `libva-v4l2-request` | yes | - | VA-API on orchard's hardware video decoders. |
+| `omactivity` | yes | yes | The touch task manager, from [OrchardLinux/omactivity](https://github.com/OrchardLinux/omactivity). Follows its `main` automatically. |
+| `folio-touch` | yes | yes | Files: Folio with touch mode, from the `touch-mode` branch of [OrchardLinux/folio](https://github.com/OrchardLinux/folio), followed automatically. Provides `folio` and conflicts with upstream Omarchy's. |
 | `omafox` | yes | yes | Firefox follows the Omarchy theme. |
 | `omacalc` | - | yes | Omarchy's calculator, which upstream Omarchy publishes for 64-bit only. |
 
@@ -84,7 +86,9 @@ silently.
 *Follow sources* looks every 20 minutes, moves the pin to the branch's newest
 commit (checksum, version and all), commits that to `main` and starts the
 build, which then builds that one package. The version contains the commit's
-number on the branch, so a newer commit is always a newer package. A source
+number on the branch (`0.1.0.3.g3ffeac29dea`: the third commit), so a newer
+commit is always a newer package. Development stays in the source
+repository; it needs no packaging of its own. A source
 repository can also announce a push and skip the wait:
 
 ```sh
@@ -94,7 +98,9 @@ gh api repos/OrchardLinux/packages/dispatches -f event_type=source-updated \
 
 from a workflow there, which needs a token that may send this event; none
 exists yet. A commit is only taken if the tracked branch contains it and it
-continues the pinned one.
+continues the pinned one. A branch marked `"rebased"` (Folio's touch mode,
+which is rebased onto upstream) is also followed across a rebase, as long as
+its commits still count upwards.
 
 **Arch moves underneath.** Mesa runs on the LLVM it was built with, and
 pacman refuses an update that would break that. Every six hours *Follow

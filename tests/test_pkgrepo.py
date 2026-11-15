@@ -41,7 +41,7 @@ class Recipes(unittest.TestCase):
 
     def test_a_newer_commit_is_a_newer_version(self):
         source = {'version': '27.0.0-devel', 'revision': 232935, 'commit': '2c1aa767d8d8836739260177144716271e05f686'}
-        self.assertEqual(pkgrepo.tracked_pkgver(source), '27.0.0.dev.r232935.2c1aa767d8d')
+        self.assertEqual(pkgrepo.tracked_pkgver(source), '27.0.0.dev.232935.g2c1aa767d8d')
 
 
 class Plan(unittest.TestCase):

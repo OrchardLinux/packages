@@ -1,0 +1,11 @@
+{
+  "repository": "OrchardLinux/folio",
+  "track": "touch-mode",
+  "rebased": true,
+  "version_tags": "omacom/folio",
+  "version": "0.4.0",
+  "commit": "f791569d306b67acbff83f58bacb7e0e82840bf8",
+  "revision": 402,
+  "url": "https://github.com/OrchardLinux/folio/archive/f791569d306b67acbff83f58bacb7e0e82840bf8.tar.gz",
+  "sha256": "f9c16db01b5aeda5baf2577b91b525a03937ed1fe616c341357fa6ed879d52ed"
+}

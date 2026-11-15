@@ -187,13 +187,50 @@ def record(args):
 
 
 def tracked_pkgver(source):
-    """Mesa's 27.0.0-devel at commit number 232935 is 27.0.0.dev.r232935.2c1aa767d8d."""
+    """Mesa's 27.0.0-devel at commit number 232935 is 27.0.0.dev.232935.g2c1aa767d8d.
+
+    The commit's number on its branch makes a newer commit a newer package.
+    It is a plain number, not r232935: pacman reads a version that goes on
+    with a letter as older than the version that stops there, and a tablet
+    with omactivity 0.1.0 has to take 0.1.0.14.g3ffeac29dea as an update.
+    """
     version = source['version'].replace('-devel', '.dev').replace('-', '.')
-    return f'{version}.r{source["revision"]}.{source["commit"][:11]}'
+    return f'{version}.{source["revision"]}.g{source["commit"][:11]}'
 
 
 def api(path):
     return json.loads(fetch('https://api.github.com/' + path))
+
+
+def release_order(tag):
+    return [int(part) for part in re.findall(r'\d+', tag)]
+
+
+def upstream_version(source, commit):
+    """The upstream version a commit of the tracked branch stands for.
+
+    Either a file of the source states it ("version_file", with
+    "version_pattern"), or it is the newest release tag of the upstream
+    repository that the commit contains ("version_tags": for a fork that has
+    no version of its own in its source, like Folio's).
+    """
+    repository = source['repository']
+    if 'version_tags' in source:
+        tags = {tag['name']: tag['commit']['sha'] for tag in api(f'repos/{source["version_tags"]}/tags?per_page=100')
+                if re.fullmatch(r'v?\d+(\.\d+)*', tag['name'])}
+        for tag in sorted(tags, key=release_order, reverse=True):
+            try:
+                relation = api(f'repos/{repository}/compare/{tags[tag]}...{commit}')['status']
+            except HTTPError as error:
+                if error.code != 404:
+                    raise
+                continue  # a release the fork does not have: not in this commit
+            if relation in ('ahead', 'identical'):
+                return tag.removeprefix('v')
+        fail(f'{repository} {commit[:11]} contains no release tag of {source["version_tags"]}')
+    stated = fetch(f'https://raw.githubusercontent.com/{repository}/{commit}/{source.get("version_file", "VERSION")}',
+                   binary=False)
+    return re.search(source.get('version_pattern', r'^(.+)$'), stated, re.M).group(1).strip()
 
 
 def bump_one(name, commit=None):
@@ -214,12 +251,18 @@ def bump_one(name, commit=None):
     if relation == 'behind':
         print(f'{name}: {new[:11]} is older than the pinned {old[:11]}; nothing to do')
         return False
+    _, headers = fetch(f'https://api.github.com/repos/{repository}/commits?sha={new}&per_page=1', headers=True)
+    last = re.search(r'[?&]page=(\d+)>; rel="last"', headers.get('Link', ''))
+    revision = int(last.group(1)) if last else 1
+    # A branch that is rebased onto its upstream (a fork kept as patches) does
+    # not continue its old commits; it is followed while its commits still
+    # count upwards, so that the package version does.
+    if relation == 'diverged' and source.get('rebased') and revision > source['revision']:
+        relation = 'ahead'
     if relation != 'ahead':
         fail(f'{name}: {new[:11]} does not continue the pinned {old[:11]} ({relation}); '
              f'{repository} {branch} was rewritten, move the pin by hand')
-    _, headers = fetch(f'https://api.github.com/repos/{repository}/commits?sha={new}&per_page=1', headers=True)
-    revision = int(re.search(r'[?&]page=(\d+)>; rel="last"', headers.get('Link', '')).group(1))
-    version = fetch(f'https://raw.githubusercontent.com/{repository}/{new}/VERSION', binary=False).strip()
+    version = upstream_version(source, new)
     url = f'https://github.com/{repository}/archive/{new}.tar.gz'
     digest = hashlib.sha256(fetch(url)).hexdigest()
     path = PACKAGES / name / 'pacman/PKGBUILD'
