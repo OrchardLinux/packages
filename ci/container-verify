@@ -24,7 +24,8 @@ pacman -Sl orchard
 # Every package installed, at the repository's version.
 [[ $(pacman -Sl orchard | grep -c '\[installed\]$') == "${#ours[@]}" ]]
 # `pacman -S NAME` keeps taking ours.
-pacman -S --print "${ours[@]}" | grep -v "^${ORCHARD_SERVER}/" && { echo 'pacman took a package elsewhere' >&2; exit 1; }
+[[ $(pacman -S --print --print-format '%r' "${ours[@]}" | sort -u) == orchard ]] ||
+  { echo 'pacman took a package elsewhere' >&2; exit 1; }
 pacman -Dk
 pacman -Qk "${ours[@]}"
 [[ " ${ours[*]} " != *" labwc "* ]] || { [[ $(pacman -Qoq /usr/bin/labwc) == labwc ]]; labwc --version; }

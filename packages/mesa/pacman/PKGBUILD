@@ -30,7 +30,7 @@ epoch=1
 # Mesa's version, the commit's number on the fork's main branch (so that a
 # newer commit is a newer package), and the commit.
 pkgver=27.0.0.dev.232935.g2c1aa767d8d
-pkgrel=1
+pkgrel=2
 pkgdesc="Mesa from the OrchardLinux fork: OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and the desktop's GPU probe"
 url="https://github.com/OrchardLinux/mesa"
 license=('MIT')
@@ -51,7 +51,7 @@ conflicts=('mesa-libgl' 'mesa-orchard' 'vulkan-powervr' 'vulkan-powervr-orchard'
 replaces=('mesa-orchard' 'vulkan-powervr-orchard')
 source=("mesa-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz" gpu-probe.c)
 sha256sums=('e6a6481bcbe736342146b8000725e739ebf389384d3a9fe3ae36def2e4c6cd2a'
-            '85a82faaf046de658e139df0f185793a9aca857129a7c90c76aaf98d74152633')
+            '8b6622bdd9bba6f8bdcc7bf407e98078517e8823a7ce22416774ca88481864f2')
 
 build() {
 	# Not arch-meson: its --auto-features=enabled turns on Mesa features this

@@ -5,10 +5,13 @@
  *
  * Does what Labwc's GLES2 renderer does for one frame, without modesetting:
  * opens EGL on the render node, allocates one output buffer of the display's
- * size there, draws into it, reads it back, and hands the buffer to the
- * display controller as a framebuffer. Exits 0 only if all of that worked and
- * the renderer is not a software one. The caller bounds the run time and sets
- * the environment the desktop would run with.
+ * size there, draws into it and reads it back. Exits 0 only if all of that
+ * worked and the renderer is not a software one. It then also offers the
+ * buffer to the display controller as a framebuffer and says so in a
+ * "GPU-PROBE NOTE" when the controller does not take it: that does not fail
+ * the probe, because wlroots copies to the display where direct import is
+ * not possible (the A10's display controller). The caller bounds the run
+ * time and sets the environment the desktop would run with.
  */
 #define _GNU_SOURCE
 #include <EGL/egl.h>
@@ -180,27 +183,30 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* The display controller must take the buffer, as at Labwc's first commit. */
+    /* Whether the display controller takes the buffer directly, as Labwc
+     * tries at its first commit. Information only: without it wlroots copies
+     * each frame into a buffer of the display's. */
     uint32_t handle = 0, fb_id = 0, handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
     uint64_t modifiers[4] = {0}, addfb2_modifiers = 0;
     if (drmPrimeFDToHandle(kms, dma, &handle)) {
-        fprintf(stderr, "GPU-PROBE FAIL: the display controller cannot import a GPU buffer: %m\n");
-        return 1;
+        fprintf(stderr, "GPU-PROBE NOTE: the display controller cannot import a GPU buffer (%m); "
+                        "the compositor copies frames to the display\n");
+    } else {
+        handles[0] = handle; pitches[0] = stride; modifiers[0] = modifier;
+        int added = -1;
+        if (modifier != DRM_FORMAT_MOD_INVALID && !drmGetCap(kms, DRM_CAP_ADDFB2_MODIFIERS, &addfb2_modifiers) &&
+            addfb2_modifiers)
+            added = drmModeAddFB2WithModifiers(kms, width, height, DRM_FORMAT_XRGB8888, handles, pitches, offsets,
+                                               modifiers, &fb_id, DRM_MODE_FB_MODIFIERS);
+        if (added) added = drmModeAddFB2(kms, width, height, DRM_FORMAT_XRGB8888, handles, pitches, offsets, &fb_id, 0);
+        if (added) added = drmModeAddFB(kms, width, height, 24, 32, stride, handle, &fb_id);
+        if (added)
+            fprintf(stderr, "GPU-PROBE NOTE: the display controller cannot scan out a GPU buffer (%m); "
+                            "the compositor copies frames to the display\n");
+        else
+            drmModeRmFB(kms, fb_id);
+        drmCloseBufferHandle(kms, handle);
     }
-    handles[0] = handle; pitches[0] = stride; modifiers[0] = modifier;
-    int added = -1;
-    if (modifier != DRM_FORMAT_MOD_INVALID && !drmGetCap(kms, DRM_CAP_ADDFB2_MODIFIERS, &addfb2_modifiers) &&
-        addfb2_modifiers)
-        added = drmModeAddFB2WithModifiers(kms, width, height, DRM_FORMAT_XRGB8888, handles, pitches, offsets,
-                                           modifiers, &fb_id, DRM_MODE_FB_MODIFIERS);
-    if (added) added = drmModeAddFB2(kms, width, height, DRM_FORMAT_XRGB8888, handles, pitches, offsets, &fb_id, 0);
-    if (added) added = drmModeAddFB(kms, width, height, 24, 32, stride, handle, &fb_id);
-    if (added) {
-        fprintf(stderr, "GPU-PROBE FAIL: the display controller cannot scan out a GPU buffer: %m\n");
-        return 1;
-    }
-    drmModeRmFB(kms, fb_id);
-    drmCloseBufferHandle(kms, handle);
 
     printf("GPU-PROBE PASS renderer=%s egl=%s size=%ux%u render=%s display=%s\n", renderer, platform,
            width, height, argv[1], argv[2]);
