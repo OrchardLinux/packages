@@ -64,6 +64,7 @@ links to it for omarchy-a's login session.
 packages/NAME/source.json     the pinned source: URL, checksum, commit; "track" if it follows a branch
 packages/NAME/patches/        changes to the source, for every base
 packages/NAME/pacman/         the Arch recipe (PKGBUILD)
+packages/NAME/tests/          tests of the patches; the recipe's check() runs them
 ci/                           the build container and the build, publish and install-check scripts
 tools/pkgrepo                 what to build, moving pins (see --help)
 ```

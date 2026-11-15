@@ -41,6 +41,7 @@ depends=(
   ttf-font
   wayland
 )
+checkdepends=(python)
 makedepends=(
   gettext
   meson
@@ -82,6 +83,18 @@ build() {
   meson setup "labwc-${_commit}" build --prefix=/usr --buildtype=release --wrap-mode=nofallback \
     -Dman-pages=enabled -Dlabnag=enabled -Dxwayland=enabled -Dnls=enabled -Dsystemd-session=enabled
   meson compile -C build
+}
+
+check() {
+  # The patches' tests (../tests), on the patched source: the bottom swipe's
+  # and the overview's arithmetic, and which touch configuration a named
+  # device's swipe comes from (compiled against wlroots).
+  local test
+  for test in test-bottom-swipe test-overview; do
+    cc -Wall -Werror -I"labwc-${_commit}/include" -o "${test}" "${startdir}/${test}.c" -lm
+    "./${test}"
+  done
+  python3 "${startdir}/test-touch-config.py" "labwc-${_commit}"
 }
 
 package() {

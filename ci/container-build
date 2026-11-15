@@ -19,13 +19,14 @@ pacman -S --noconfirm --needed "${tools[@]}"
 sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
 locale-gen >/dev/null
 
-# One flat directory, as makepkg wants it: the recipe, the patches, and the
-# files a package keeps beside them.
+# One flat directory, as makepkg wants it: the recipe, the patches, the tests
+# its check() runs, and the files a package keeps beside them.
 source=/repo/packages/$package
 build=/build/$package
 mkdir -p "$build"
 find "$source" -maxdepth 1 -type f ! -name source.json -exec cp -t "$build" {} +
 [[ ! -d $source/patches ]] || cp "$source"/patches/* "$build/"
+[[ ! -d $source/tests ]] || cp "$source"/tests/* "$build/"
 cp "$source"/pacman/* "$build/"
 useradd --create-home builder
 chown -R builder: "$build" /out
