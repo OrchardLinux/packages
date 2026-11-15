@@ -17,7 +17,7 @@ pkgname=labwc
 _commit=97f28877a343e062f3178d201f0248cd9c2610cf
 epoch=1
 pkgver=0.20.2
-pkgrel=1
+pkgrel=2
 pkgdesc='stacking wayland compositor with look and feel from openbox, with OrchardLinux tablet patches'
 url="https://github.com/labwc/labwc"
 arch=('aarch64' 'armv7h')
@@ -65,7 +65,7 @@ source=("labwc-${_commit}.tar.gz::https://codeload.github.com/labwc/labwc/tar.gz
 sha256sums=('022676dbcbf6b6206b97d7bac8a339c8a0203e3e99693107c15b5a6183e4b0ea'
             '79b1d2a23a5ec2ffa7b5e479bf29af10f72f5f960e019e62d998a73cc25a2264'
             '6ad9344f373526841560b235c32bc157a3af550890f125a3e6f9deb00ed9202e'
-            '72c7f10dcb13557d92a0c276887f35edfdfb8db645196cc98f0514150de6eca9'
+            'b17d682b73b890cadde34cdede0529b361e4303c9e1d17ffc85ad7ae212884f8'
             '0af471fa5fdb9a8fbf5824a0ab4a28c44f3a2e740104e8079df0e8355b083c75'
             '0966d5b303c6230eb429154f0e24708cc3a5421cc7f02a8f81239e660456da67')
 
