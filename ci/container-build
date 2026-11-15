@@ -29,6 +29,9 @@ chown -R builder: "$build" /out
 
 sed -i "s/^#\?MAKEFLAGS=.*/MAKEFLAGS=\"-j$(nproc)\"/; s/^PKGEXT=.*/PKGEXT='.pkg.tar.zst'/" /etc/makepkg.conf
 [[ ! -d /ccache ]] || sed -i '/^BUILDENV=/s/!ccache/ccache/' /etc/makepkg.conf
+# The shared makepkg defaults enable RELR, which GNU ld for ARM32 rejects (as
+# in omarchy-a's ARMv7 builder). The remaining Arch hardening flags stay.
+[[ $ORCHARD_ARCH != armv7h ]] || sed -i 's/ -Wl,-z,pack-relative-relocs//g' /etc/makepkg.conf
 # No separate -debug packages: the repository carries what tablets install.
 sed -i '/^OPTIONS=/{s/!debug/debug/; s/\bdebug\b/!debug/}' /etc/makepkg.conf
 as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER='OrchardLinux packages (CI)'

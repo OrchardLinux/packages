@@ -42,9 +42,11 @@ See the README for the whole pacman.conf entry."
   [[ ! -f $work/old/orchard.files ]] || cp "$work/old/orchard.files" "$work/new/orchard.files.tar.gz"
   [[ ! -f $work/old/built.json ]] || cp "$work/old/built.json" "$work/new/built.json"
   cp "${packages[@]}" "$work/new/"
+  # The artifact's directory names the package (ci/container-build checked it).
   names=()
   for package in "${packages[@]}"; do
-    names+=("$(bsdtar -xOf "$package" .PKGINFO | sed -n 's/^pkgname = //p')")
+    directory=$(basename "$(dirname "$package")")
+    names+=("${directory#package-"$arch"-}")
   done
 
   sign=()
