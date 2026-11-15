@@ -11,7 +11,7 @@ sed -i '/^DownloadUser = /d; /^DisableSandbox/d; /^CheckSpace/a DisableSandboxFi
 : > /out/broken
 for arch in aarch64 armv7h; do
   root=$(mktemp -d)
-  mkdir -p "$root/var/lib/pacman"
+  mkdir -p "$root/var/lib/pacman" "$root/cache"
   sed "s/^#\?Architecture *=.*/Architecture = $arch/" /etc/pacman.conf > "$root/pacman.conf"
   sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER_BASE/repo-$arch\n" "$root/pacman.conf"
   pacman=(pacman --config "$root/pacman.conf" --root "$root" --dbpath "$root/var/lib/pacman"
