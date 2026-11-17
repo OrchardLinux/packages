@@ -88,7 +88,6 @@ class Recipes(unittest.TestCase):
         self.assertNotIn('python3', text.split('build()')[1])
 
     def test_omarchy_a_waits_for_its_first_release_then_bump_pins_it(self):
-        self.assertTrue(pkgrepo.waiting('omarchy-a'))
         commit = 'c' * 40
         archive = b'omarchy-a v0.4.0'
         digest = hashlib.sha256(archive).hexdigest()
@@ -97,10 +96,14 @@ class Recipes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             packages = Path(directory) / 'packages'
             shutil.copytree(ROOT / 'packages/omarchy-a', packages / 'omarchy-a')
+            # Before its first release: the pin names the repository and the tracking only.
+            (packages / 'omarchy-a/source.json').write_text(pkgrepo.json.dumps(
+                {'repository': 'OrchardLinux/omarchy-a', 'track': 'releases'}))
             with mock.patch.object(pkgrepo, 'PACKAGES', packages), \
                     mock.patch.object(pkgrepo, 'api', lambda path: replies[path]), \
                     mock.patch.object(pkgrepo, 'fetch', return_value=archive) as fetch, \
                     mock.patch('sys.stdout', io.StringIO()):
+                self.assertTrue(pkgrepo.waiting('omarchy-a'))
                 self.assertTrue(pkgrepo.bump_one('omarchy-a'))
                 self.assertEqual(pkgrepo.recipe('omarchy-a')['version'], '0.4.0-1')
                 self.assertFalse(pkgrepo.waiting('omarchy-a'))
@@ -146,7 +149,8 @@ class Plan(unittest.TestCase):
         self.assertIn({'base': 'alpine', 'arch': 'armv7'}, pkgrepo.json.loads(result['targets']))
 
     def test_a_package_waiting_for_its_first_release_is_not_built(self):
-        builds = {b['package'] for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
+        with mock.patch.object(pkgrepo, 'waiting', lambda name: name == 'omarchy-a'):
+            builds = {b['package'] for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
         self.assertNotIn('omarchy-a', builds)
         with mock.patch.object(pkgrepo, 'waiting', lambda name: False):
             builds = {(b['package'], b['arch']) for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
