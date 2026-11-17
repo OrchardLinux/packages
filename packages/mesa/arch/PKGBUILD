@@ -30,7 +30,7 @@ epoch=1
 # Mesa's version, the commit's number on the fork's main branch (so that a
 # newer commit is a newer package), and the commit.
 pkgver=27.0.0.dev.232935.g2c1aa767d8d
-pkgrel=2
+pkgrel=3
 pkgdesc="Mesa from the OrchardLinux fork: OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and the desktop's GPU probe"
 url="https://github.com/OrchardLinux/mesa"
 license=('MIT')
@@ -60,7 +60,7 @@ build() {
 		-Dvideo-codecs= -Dtools= -Dvulkan-layers= -Dbuild-tests=false)
 	# The Vulkan driver, with the options it has been tested with on the tablets.
 	meson setup "mesa-${_commit}" build-vulkan "${common[@]}" --buildtype=debugoptimized \
-		-Dplatforms=wayland -Dvulkan-drivers=imagination -Dgallium-drivers= \
+		-Dplatforms=x11,wayland -Dvulkan-drivers=imagination -Dgallium-drivers= \
 		-Dopengl=false -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dgles2=disabled
 	ninja -C build-vulkan
 	# OpenGL. X11 and GLX are for applications under Xwayland, as in Arch's mesa.
