@@ -48,9 +48,10 @@ as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER='
 cd "$build"
 test "$("${as_builder[@]}" bash -c 'source /etc/makepkg.conf; echo "$CARCH"')" = "$ORCHARD_ARCH"
 
-# What the recipe needs to build and to run.
+# What the recipe needs to build and to run, its own architecture's lists included
+# (depends_aarch64 and the like).
 mapfile -t needs < <("${as_builder[@]}" makepkg --printsrcinfo |
-  sed -n 's/^\t\(make\|check\)\?depends = //p' | sort -u)
+  sed -n "s/^\t\(make\|check\)\?depends\(_$ORCHARD_ARCH\)\? = //p" | sort -u)
 if (( ${#needs[@]} )); then
   pacman-download -S --noconfirm --needed --asdeps "${needs[@]}"
   pacman -S --noconfirm --needed --asdeps "${needs[@]}"
