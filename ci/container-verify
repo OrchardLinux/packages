@@ -5,22 +5,13 @@
 # After that every package of the repository installs and pacman finds
 # nothing wrong with the result.
 set -euo pipefail
-: "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER:?}"
+: "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER_BASE:?}"
 bash /repo/ci/prepare-pacman
 replaced=(labwc wlroots0.20 mesa)
 pacman-download -S --noconfirm --needed "${replaced[@]}"
 pacman -S --noconfirm --needed "${replaced[@]}"
 
-# Unsigned for now: see docs/signing.md for the entry once the key exists.
-sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER\n" /etc/pacman.conf
-# On 64-bit, as on a 64-bit tablet, upstream Omarchy's repository after ours,
-# signed with Omarchy's key (ci/omarchy-pkgs.asc): omarchy-a depends on its
-# Omacalc and keyring.
-if [[ $ORCHARD_ARCH == aarch64 ]]; then
-  pacman-key --add /repo/ci/omarchy-pkgs.asc
-  pacman-key --lsign-key 40DFB630FF42BCFFB047046CF0134EE680CAC571
-  sed -i "/^\[core\]/i [omarchy]\nServer = https://pkgs.omarchy.org/stable/\$arch\n" /etc/pacman.conf
-fi
+bash /repo/ci/tablet-repos /etc/pacman.conf "$ORCHARD_ARCH" "$ORCHARD_SERVER_BASE" --trust
 pacman -Syu --noconfirm
 mapfile -t all < <(pacman -Slq orchard)
 (( ${#all[@]} ))

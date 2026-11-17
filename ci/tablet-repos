@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# List the repositories a tablet has in a pacman.conf, ahead of Arch Linux
+# ARM's: [orchard] (this repository, as published), then on 64-bit upstream
+# Omarchy's [omarchy], signed with Omarchy's key (omarchy-pkgs.asc): omarchy-a
+# depends on its Omacalc and keyring. With --trust, this system's keyring
+# trusts that key too.
+#
+#   tablet-repos PACMAN_CONF ARCH SERVER_BASE [--trust]
+#   SERVER_BASE: the releases' download URL; [orchard] is its repo-ARCH
+set -euo pipefail
+conf=$1 arch=$2 base=$3 trust=${4:-}
+# Unsigned for now: see docs/signing.md for the entry once the key exists.
+sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $base/repo-$arch\n" "$conf"
+if [[ $arch == aarch64 ]]; then
+  sed -i "/^\[core\]/i [omarchy]\nServer = https://pkgs.omarchy.org/stable/\$arch\n" "$conf"
+  if [[ $trust == --trust ]]; then
+    pacman-key --add "$(dirname "$0")/omarchy-pkgs.asc"
+    pacman-key --lsign-key 40DFB630FF42BCFFB047046CF0134EE680CAC571
+  fi
+fi

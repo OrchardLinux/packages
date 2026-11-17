@@ -18,5 +18,7 @@ if [[ $base == alpine ]]; then
   [[ -z ${ORCHARD_APK_KEY:-} ]] || mounts+=(-e ORCHARD_APK_KEY)
   "$here/container" "alpine-$arch" "${mounts[@]}" -- sh /repo/ci/container-build-alpine "$package" "$version"
 else
+  # The published repository, for what the package needs from it.
+  mounts+=(-e ORCHARD_SERVER_BASE="https://github.com/${GITHUB_REPOSITORY:-OrchardLinux/packages}/releases/download")
   "$here/container" "$arch" "${mounts[@]}" -- bash /repo/ci/container-build "$package" "$version"
 fi
