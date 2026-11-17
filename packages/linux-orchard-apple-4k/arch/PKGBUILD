@@ -1,0 +1,30 @@
+# orchard's kernel for apple-4k: an orchard release's platform layer, unchanged
+# (kernel, modules, the boards' device trees, orchard's initrd, hardware defaults
+# and /usr/lib/orchard/boot-entries), with the pacman hooks that run boot-entries.
+# Plain makepkg builds it; nothing is compiled. A release of orchard is a new pkgver
+# and checksum (`tools/pkgrepo orchard-release VERSION` writes both for every kernel package).
+
+pkgname=linux-orchard-apple-4k
+_platform=apple-4k
+pkgver=0.3.1
+pkgrel=1
+pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple A7, A8 and A8X"
+arch=('aarch64')
+url='https://github.com/OrchardLinux/orchard'
+license=('GPL-2.0-only' 'ISC')
+# One platform per system: the platforms' packages share the hardware defaults.
+provides=('linux-orchard' 'wireless-regdb')
+conflicts=('linux-orchard' 'wireless-regdb')
+options=('!strip' '!debug')
+source=("platform-${_platform}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/platform-${_platform}.tar.gz"
+        '05-orchard-boot-entries-save.hook'
+        '95-orchard-boot-entries.hook')
+noextract=("platform-${_platform}-${pkgver}.tar.gz")
+sha256sums=('0b27c565d3f28e3f5b8202b1a06ac4737ad14cd5ceadbb1359745541085908df'
+            'e8933219691a50afe1d6943fae2df044a2c2fc3017b507f1a4e704cf0842615b'
+            'fcc8693f613532d57e20f01512413b5572498af863b794750b4dd6fcff28ca2c')
+
+package() {
+    bsdtar -xpf "platform-${_platform}-${pkgver}.tar.gz" -C "$pkgdir"
+    install -Dm644 -t "$pkgdir/usr/share/libalpm/hooks" 05-orchard-boot-entries-save.hook 95-orchard-boot-entries.hook
+}

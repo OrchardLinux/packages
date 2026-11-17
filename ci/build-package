@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Build one package for one architecture into out/. Needs Docker on an arm64
-# host; with CCACHE=1 the compiler cache is kept in .ccache/.
+# Build one package of one base for one architecture into out/. Needs Docker
+# on an arm64 host; with CCACHE=1 the compiler cache is kept in .ccache/.
 #
-#   ci/build-package PACKAGE ARCH VERSION
+#   ci/build-package BASE PACKAGE ARCH VERSION      BASE: arch or alpine
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
-package=$1 arch=$2 version=$3
+base=$1 package=$2 arch=$3 version=$4
 mkdir -p "$repo/out"
 mounts=(-v "$repo:/repo:ro" -v "$repo/out:/out")
 if [[ ${CCACHE:-} == 1 ]]; then
   mkdir -p "$repo/.ccache"
   mounts+=(-v "$repo/.ccache:/ccache")
 fi
-"$here/container" "$arch" "${mounts[@]}" -- bash /repo/ci/container-build "$package" "$version"
+if [[ $base == alpine ]]; then
+  # The signing key, when the repository has one (docs/signing.md); else abuild makes one for this build.
+  [[ -z ${ORCHARD_APK_KEY:-} ]] || mounts+=(-e ORCHARD_APK_KEY)
+  "$here/container" "alpine-$arch" "${mounts[@]}" -- sh /repo/ci/container-build-alpine "$package" "$version"
+else
+  "$here/container" "$arch" "${mounts[@]}" -- bash /repo/ci/container-build "$package" "$version"
+fi

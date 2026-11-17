@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Add built packages to the published pacman repository `orchard`: the files of
-# the GitHub release repo-ARCH. The only place that writes the index; the
-# workflow runs one publish at a time.
+# Add built packages to the published repositories: pacman's `orchard`, the
+# files of the GitHub release repo-ARCH, and the apk repository, the files of
+# the release named ARCH (apk asks SERVER/ARCH/APKINDEX.tar.gz). The only place
+# that writes the indexes; the workflow runs one publish at a time.
 #
-#   ci/publish ARTIFACTS    ARTIFACTS/package-ARCH-NAME/NAME-VERSION-ARCH.pkg.tar.zst
+#   ci/publish ARTIFACTS    ARTIFACTS/package-arch-ARCH-NAME/NAME-VERSION-ARCH.pkg.tar.zst
+#                           ARTIFACTS/package-alpine-ARCH-NAME/NAME-VERSION.apk
 #
 # Packages go up first and the index last, and the files of the index before
 # this one stay: a tablet that read the old index still finds its packages.
 #
 # Signing: when ORCHARD_SIGNING_KEY holds the armored secret signing subkey
-# (docs/signing.md), every package and the index are signed with it. Without
-# it the repository is unsigned.
+# (docs/signing.md), every pacman package and the index are signed with it;
+# without it that repository is unsigned. apk indexes are always signed, with
+# ORCHARD_APK_KEY when it is set and else with a key made for this publish,
+# which no user has (--allow-untrusted until the key exists).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
@@ -20,7 +24,7 @@ export GH_REPO
 
 for arch in aarch64 armv7h; do
   shopt -s nullglob
-  packages=("$artifacts"/package-"$arch"-*/*.pkg.tar.zst)
+  packages=("$artifacts"/package-arch-"$arch"-*/*.pkg.tar.zst)
   shopt -u nullglob
   (( ${#packages[@]} )) || continue
   tag=repo-$arch
@@ -46,7 +50,7 @@ See the README for the whole pacman.conf entry."
   names=()
   for package in "${packages[@]}"; do
     directory=$(basename "$(dirname "$package")")
-    names+=("${directory#package-"$arch"-}")
+    names+=("${directory#package-arch-"$arch"-}")
   done
 
   sign=()
@@ -56,16 +60,18 @@ See the README for the whole pacman.conf entry."
   fi
   # repo-add is pacman's; any architecture's container has it.
   "$here/container" aarch64 -v "$work/new:/work" -w /work -- bash -euc '
+    shopt -s nullglob
+    packages=(*.pkg.tar.zst)
     if [[ -f .signing-key ]]; then
       export GNUPGHOME=$(mktemp -d)
       gpg --batch --import .signing-key
       rm .signing-key
-      for package in *.pkg.tar.zst; do gpg --batch --yes --detach-sign --no-armor "$package"; done
+      for package in "${packages[@]}"; do gpg --batch --yes --detach-sign --no-armor "$package"; done
     fi
-    repo-add "$@" orchard.db.tar.gz *.pkg.tar.zst
+    repo-add "$@" orchard.db.tar.gz "${packages[@]}"
   ' repo-add "${sign[@]}"
   sudo chown -R "$(id -u):$(id -g)" "$work/new"
-  python3 "$repo/tools/pkgrepo" record "$work/new/built.json" "${names[@]}"
+  python3 "$repo/tools/pkgrepo" record --base arch "$work/new/built.json" "${names[@]}"
 
   shopt -s nullglob
   gh release upload "$tag" --clobber "$work"/new/*.pkg.tar.zst "$work"/new/*.pkg.tar.zst.sig
@@ -81,8 +87,67 @@ See the README for the whole pacman.conf entry."
   shopt -u nullglob
 
   mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name')
-  mapfile -t stale < <(python3 "$repo/tools/pkgrepo" prune \
+  mapfile -t stale < <(python3 "$repo/tools/pkgrepo" prune --base arch \
     --index "$work/index/orchard.db" "$work/old/orchard.db" --assets "${assets[@]}")
+  for asset in "${stale[@]}"; do
+    gh release delete-asset "$tag" "$asset" --yes
+  done
+  echo "Published to $tag: ${names[*]}"
+  rm -rf "$work"
+done
+
+for arch in aarch64 armv7; do
+  shopt -s nullglob
+  packages=("$artifacts"/package-alpine-"$arch"-*/*.apk)
+  shopt -u nullglob
+  (( ${#packages[@]} )) || continue
+  tag=$arch
+  if ! gh release view "$tag" >/dev/null 2>&1; then
+    gh release create "$tag" --latest=false --title "Package repository: Alpine $arch" --notes \
+"The apk repository for Alpine on $arch. Not a release to download by hand: apk reads it.
+
+    echo https://github.com/$GH_REPO/releases/download >> /etc/apk/repositories
+
+See the README."
+  fi
+  work=$(mktemp -d)
+  mkdir "$work/old" "$work/new"
+  for file in APKINDEX.tar.gz built.json; do
+    gh release download "$tag" --pattern "$file" --dir "$work/old" 2>/dev/null || true
+  done
+  [[ ! -f $work/old/built.json ]] || cp "$work/old/built.json" "$work/new/built.json"
+  cp "${packages[@]}" "$work/new/"
+  names=()
+  for package in "${packages[@]}"; do
+    directory=$(basename "$(dirname "$package")")
+    names+=("${directory#package-alpine-"$arch"-}")
+  done
+  # apk index reads the packages themselves: the ones the old index keeps come back down.
+  if [[ -f $work/old/APKINDEX.tar.gz ]]; then
+    while read -r file; do
+      name=${file%-*-r*.apk}
+      [[ " ${names[*]} " == *" $name "* ]] || gh release download "$tag" --pattern "$file" --dir "$work/new"
+    done < <(python3 "$repo/tools/pkgrepo" files --base alpine "$work/old/APKINDEX.tar.gz")
+  fi
+  [[ -z ${ORCHARD_APK_KEY:-} ]] || printf '%s\n' "$ORCHARD_APK_KEY" > "$work/new/.signing-key"
+  "$here/container" alpine-aarch64 -v "$work/new:/work" -w /work -- sh -euc '
+    apk add --no-cache abuild >/dev/null
+    if [ -f .signing-key ]; then
+      mkdir -p /keys && mv .signing-key /keys/orchard.rsa
+    else
+      mkdir -p /keys && openssl genrsa -out /keys/orchard.rsa 4096 2>/dev/null
+    fi
+    openssl rsa -in /keys/orchard.rsa -pubout -out /keys/orchard.rsa.pub 2>/dev/null
+    apk index --allow-untrusted --description "Orchard packages" -o APKINDEX.tar.gz *.apk
+    abuild-sign -k /keys/orchard.rsa -p orchard.rsa.pub APKINDEX.tar.gz
+  '
+  sudo chown -R "$(id -u):$(id -g)" "$work/new"
+  python3 "$repo/tools/pkgrepo" record --base alpine "$work/new/built.json" "${names[@]}"
+  gh release upload "$tag" --clobber "$work"/new/*.apk
+  gh release upload "$tag" --clobber "$work/new/APKINDEX.tar.gz" "$work/new/built.json"
+  mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name')
+  mapfile -t stale < <(python3 "$repo/tools/pkgrepo" prune --base alpine \
+    --index "$work/new/APKINDEX.tar.gz" "$work/old/APKINDEX.tar.gz" --assets "${assets[@]}")
   for asset in "${stale[@]}"; do
     gh release delete-asset "$tag" "$asset" --yes
   done

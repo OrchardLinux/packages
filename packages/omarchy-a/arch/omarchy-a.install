@@ -1,0 +1,9 @@
+# What root does when omarchy-a is installed or updated is omarchy-a's own
+# code, shipped in the package; this only calls it.
+post_install() {
+  /usr/lib/omarchy-a/package-install post-install "$1"
+}
+
+post_upgrade() {
+  /usr/lib/omarchy-a/package-install post-upgrade "$1" "$2"
+}

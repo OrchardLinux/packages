@@ -13,9 +13,23 @@ pacman -S --noconfirm --needed "${replaced[@]}"
 
 # Unsigned for now: see docs/signing.md for the entry once the key exists.
 sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER\n" /etc/pacman.conf
+# On 64-bit, as on a 64-bit tablet, upstream Omarchy's repository after ours,
+# signed with Omarchy's key (ci/omarchy-pkgs.asc): omarchy-a depends on its
+# Omacalc and keyring.
+if [[ $ORCHARD_ARCH == aarch64 ]]; then
+  pacman-key --add /repo/ci/omarchy-pkgs.asc
+  pacman-key --lsign-key 40DFB630FF42BCFFB047046CF0134EE680CAC571
+  sed -i "/^\[core\]/i [omarchy]\nServer = https://pkgs.omarchy.org/stable/\$arch\n" /etc/pacman.conf
+fi
 pacman -Syu --noconfirm
-mapfile -t ours < <(pacman -Slq orchard)
-(( ${#ours[@]} ))
+mapfile -t all < <(pacman -Slq orchard)
+(( ${#all[@]} ))
+# orchard's kernel packages conflict with each other (linux-orchard): they are
+# checked one at a time, after the rest.
+ours=() kernels=()
+for name in "${all[@]}"; do
+  if [[ $name == linux-orchard-* ]]; then kernels+=("$name"); else ours+=("$name"); fi
+done
 for name in "${replaced[@]}"; do
   [[ " ${ours[*]} " != *" $name "* ]] || pacman -Sl orchard | grep "^orchard $name .*\[installed\]$" >/dev/null
 done
@@ -31,4 +45,19 @@ pacman -Qk "${ours[@]}"
 [[ " ${ours[*]} " != *" labwc "* ]] || { [[ $(pacman -Qoq /usr/bin/labwc) == labwc ]]; labwc --version; }
 [[ " ${ours[*]} " != *" mesa "* ]] ||
   [[ $(pacman -Qoq /usr/lib/libEGL_mesa.so.0 /usr/lib/libgbm.so.1 /usr/lib/libvulkan_powervr_mesa.so /usr/lib/orchard/gpu-probe | sort -u) == mesa ]]
-echo "Verified $ORCHARD_ARCH: ${ours[*]}"
+# A kernel package installs, and on a system the Orchard installer did not set up
+# (no /etc/orchard/boot-entry) its hooks write and keep nothing.
+pacman -Rdd --noconfirm wireless-regdb 2>/dev/null || true
+for name in "${kernels[@]}"; do
+  pacman -S --noconfirm "$name"
+  pacman -Qk "$name"
+  [[ $(pacman -Qoq /usr/share/libalpm/hooks/95-orchard-boot-entries.hook) == "$name" ]]
+  # Layers from orchard 0.4 on carry the script; the hooks skip it where it is missing.
+  [[ ! -x /usr/lib/orchard/boot-entries ]] || /usr/lib/orchard/boot-entries sync | grep -q 'nothing to do'
+  [[ ! -e /boot/loader ]]
+  pacman -R --noconfirm "$name"
+  [[ ! -e /usr/lib/modules/.orchard-saved ]]
+  if compgen -G '/usr/lib/modules/*/.orchard-kept' >/dev/null; then echo "$name kept a kernel" >&2; exit 1; fi
+done
+pacman -Dk
+echo "Verified $ORCHARD_ARCH: ${all[*]}"

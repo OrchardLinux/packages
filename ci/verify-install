@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Install the published repository of one architecture in a fresh container.
+# Install the published repository of one base and architecture in a fresh container.
 #
-#   ci/verify-install ARCH
+#   ci/verify-install BASE ARCH       BASE: arch or alpine
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-arch=$1
-server=https://github.com/${GITHUB_REPOSITORY:-OrchardLinux/packages}/releases/download/repo-$arch
-"$here/container" "$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$server" -- bash /repo/ci/container-verify
+base=$1 arch=$2
+download=https://github.com/${GITHUB_REPOSITORY:-OrchardLinux/packages}/releases/download
+if [[ $base == alpine ]]; then
+  # apk asks SERVER/ARCH/APKINDEX.tar.gz: the release named after the architecture.
+  "$here/container" "alpine-$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$download" \
+    -- sh /repo/ci/container-verify-alpine
+else
+  "$here/container" "$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$download/repo-$arch" \
+    -- bash /repo/ci/container-verify
+fi

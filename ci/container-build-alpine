@@ -1,0 +1,52 @@
+#!/bin/sh
+# Inside the Alpine build container (ci/build-package starts it): build one
+# package with abuild, as an unprivileged user, against an updated Alpine.
+#
+#   /repo    this repository, read-only
+#   /out     receives the package
+#
+# abuild signs every package. With ORCHARD_APK_KEY (the repository's private
+# key, docs/signing.md) it signs with that; without it, with a key made for
+# this build, and the repository is unsigned for its users (--allow-untrusted).
+set -eu
+package=$1
+version=$2
+: "${ORCHARD_ARCH:?}"
+apk upgrade --no-cache --available
+apk add --no-cache alpine-sdk
+adduser -D builder
+addgroup builder abuild
+
+# One flat directory, as abuild wants it: the recipe, its scripts, and the
+# files and patches beside it.
+source=/repo/packages/$package
+build=/build/$package
+mkdir -p "$build"
+find "$source" -maxdepth 1 -type f ! -name source.json -exec cp {} "$build/" \;
+[ ! -d "$source/patches" ] || cp "$source"/patches/* "$build/"
+cp "$source"/alpine/* "$build/"
+chown -R builder: "$build" /out
+
+home=/home/builder
+mkdir -p "$home/.abuild"
+if [ -n "${ORCHARD_APK_KEY:-}" ]; then
+  printf '%s\n' "$ORCHARD_APK_KEY" > "$home/.abuild/orchard.rsa"
+  openssl rsa -in "$home/.abuild/orchard.rsa" -pubout -out "$home/.abuild/orchard.rsa.pub" 2>/dev/null
+  echo "PACKAGER_PRIVKEY=$home/.abuild/orchard.rsa" > "$home/.abuild/abuild.conf"
+  chown -R builder: "$home/.abuild"
+else
+  chown -R builder: "$home/.abuild"
+  su builder -c 'abuild-keygen -a -n' >/dev/null 2>&1
+fi
+cp "$home"/.abuild/*.rsa.pub /etc/apk/keys/
+
+cd "$build"
+test "$(apk --print-arch)" = "$ORCHARD_ARCH"
+# -r: what the recipe needs comes from Alpine's signed repositories.
+su builder -c "REPODEST=/tmp/repo PACKAGER='OrchardLinux packages (CI)' abuild -r"
+
+# Exactly the planned package, for this architecture.
+file=$(find /tmp/repo -name "$package-$version.apk" -path "*/$ORCHARD_ARCH/*")
+[ -n "$file" ] || { echo "abuild made no $package-$version.apk for $ORCHARD_ARCH" >&2; exit 1; }
+cp "$file" /out/
+echo "Built $(basename "$file") ($(stat -c %s "$file") bytes)"

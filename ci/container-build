@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Inside the build container (ci/build-package starts it): build one package
+# Inside the Arch build container (ci/build-package starts it): build one package
 # with makepkg, as an unprivileged user, against a fully updated Arch.
 #
 #   /repo    this repository, read-only
@@ -27,7 +27,7 @@ mkdir -p "$build"
 find "$source" -maxdepth 1 -type f ! -name source.json -exec cp -t "$build" {} +
 [[ ! -d $source/patches ]] || cp "$source"/patches/* "$build/"
 [[ ! -d $source/tests ]] || cp "$source"/tests/* "$build/"
-cp "$source"/pacman/* "$build/"
+cp "$source"/arch/* "$build/"
 useradd --create-home builder
 chown -R builder: "$build" /out
 [[ ! -d /ccache ]] || chown -R builder: /ccache

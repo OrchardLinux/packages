@@ -1,12 +1,14 @@
 name: Follow sources
 # Keeps the packages current without anyone bumping a pin by hand:
 #
-# - a source repository that a package tracks (packages/NAME/source.json,
-#   "track") moved: the pin moves to its newest commit, is committed to main,
-#   and the build builds that package. Found by polling, and at once when the
-#   source repository sends `source-updated` (repository_dispatch with
-#   client_payload {"repo": "OrchardLinux/mesa", "sha": "..."}; that needs a
-#   token in the sending repository, which does not exist yet);
+# - a source repository that a package follows (packages/NAME/source.json,
+#   "track") made a release: the pin moves to that release's tag, is committed
+#   to main, and the build builds that package. Pushes to a source publish
+#   nothing. Found by polling, and at once when the source repository sends
+#   `source-updated` (repository_dispatch with client_payload
+#   {"repo": "OrchardLinux/mesa", "tag": "v27.0.0"}; that needs a token in the
+#   sending repository, which does not exist yet). orchard's kernel packages
+#   move with `tools/pkgrepo orchard-release VERSION`;
 # - Arch moved a library a published package is locked to (LLVM under Mesa):
 #   the package's pkgrel is raised and it is built again against today's Arch.
 on:
@@ -20,8 +22,8 @@ on:
       package:
         description: Only this package's pin
         required: false
-      commit:
-        description: Move to this commit of the tracked branch instead of its newest
+      tag:
+        description: Move to this release tag instead of the newest release
         required: false
       installable:
         description: Check instead that the published packages still install
@@ -44,17 +46,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SENT_REPOSITORY: ${{ github.event.client_payload.repo }}
-          SENT_COMMIT: ${{ github.event.client_payload.sha }}
+          SENT_TAG: ${{ github.event.client_payload.tag }}
           PACKAGE: ${{ inputs.package }}
-          COMMIT: ${{ inputs.commit }}
+          TAG: ${{ inputs.tag }}
         run: |
           python3 tools/pkgrepo bump ${SENT_REPOSITORY:+--repository "$SENT_REPOSITORY"} \
-            ${PACKAGE:+--package "$PACKAGE"} ${SENT_COMMIT:+--commit "$SENT_COMMIT"} ${COMMIT:+--commit "$COMMIT"}
+            ${PACKAGE:+--package "$PACKAGE"} ${SENT_TAG:+--tag "$SENT_TAG"} ${TAG:+--tag "$TAG"}
       - env:
           GH_TOKEN: ${{ github.token }}
           MOVED: ${{ steps.bump.outputs.moved }}
         run: |
-          ci/commit-and-build "${MOVED// /, }: follow the source's newest commit"
+          ci/commit-and-build "${MOVED// /, }: the source's new release"
   installable:
     if: github.event.schedule == '37 */6 * * *' || inputs.installable
     runs-on: ubuntu-24.04-arm

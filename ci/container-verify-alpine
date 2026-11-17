@@ -1,0 +1,40 @@
+#!/bin/sh
+# Inside a fresh Alpine container: what a minimal-linux tablet does. The
+# repository is added to Alpine's and every package of it has to install.
+# orchard's kernel packages conflict
+# with each other and go one at a time; on a system the Orchard installer did
+# not set up (no /etc/orchard/boot-entry) their scripts and trigger write and
+# keep nothing.
+#
+# Unsigned for now: the packages and the index carry a signature, but users
+# have no key for it yet (docs/signing.md), hence --allow-untrusted.
+set -eu
+: "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER:?}"
+apk upgrade --no-cache --available
+echo "$ORCHARD_SERVER" >> /etc/apk/repositories
+apk update --allow-untrusted
+names=$(wget -qO- "$ORCHARD_SERVER/$ORCHARD_ARCH/APKINDEX.tar.gz" | tar -xzO APKINDEX | sed -n 's/^P://p' | sort -u)
+[ -n "$names" ]
+ours='' kernels=''
+for name in $names; do
+  case $name in linux-orchard-*) kernels="$kernels $name" ;; *) ours="$ours $name" ;; esac
+done
+if [ -n "$ours" ]; then
+  # shellcheck disable=SC2086  # one word per package
+  apk add --allow-untrusted $ours
+fi
+for name in $kernels; do
+  apk add --allow-untrusted "$name"
+  apk info -e "$name"
+  # Layers from orchard 0.4 on carry the script; the trigger skips it where it is missing.
+  if [ -x /usr/lib/orchard/boot-entries ]; then
+    apk info -q --who-owns /usr/lib/orchard/boot-entries | grep -q "$name"
+    /usr/lib/orchard/boot-entries sync | grep -q 'nothing to do'
+  fi
+  [ ! -e /boot/loader ]
+  apk del "$name"
+  [ ! -e /usr/lib/modules/.orchard-saved ]
+  if ls /usr/lib/modules/*/.orchard-kept >/dev/null 2>&1; then echo "$name kept a kernel" >&2; exit 1; fi
+done
+# shellcheck disable=SC2086,SC2116  # the names on one line
+echo "Verified alpine $ORCHARD_ARCH: $(echo $names)"

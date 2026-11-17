@@ -1,0 +1,109 @@
+# Omarchy A's own files: the touch desktop, its configuration and its system
+# defaults (https://github.com/OrchardLinux/omarchy-a), as upstream Omarchy's
+# are its omarchy package. A release of omarchy-a reaches [orchard] when
+# `tools/pkgrepo bump` moves _commit, pkgver and the first checksum here (and
+# ../source.json) to its tag, as for every package; its main branch and
+# nightlies publish nothing. Until its first release that builds this way,
+# source.json pins no tag and nothing is built.
+#
+# The release tarball's Makefile compiles the on-screen keyboard (wvkbd with
+# omarchy-a's patches) and the startup cursor helper (wtype), and `make
+# install` puts every file in place (desktop/install-tree). The other sources
+# are pinned here: upstream Omarchy at the commit omarchy-a's
+# desktop/upstream.lock names (its themes), and the Bluetooth helper's D-Bus
+# library. omarchy-a's image build runs this recipe on a tarball of its own
+# checkout (the first source and checksum replaced), so an image carries
+# exactly the package its commit makes. Root's part of a change between
+# versions is omarchy-a's /usr/lib/omarchy-a/package-install.
+
+pkgname=omarchy-a
+pkgver=0
+pkgrel=1
+pkgdesc='Omarchy A: the touch desktop for Apple A-chip devices, its configuration and system defaults'
+arch=('aarch64' 'armv7h')
+url='https://github.com/OrchardLinux/omarchy-a'
+license=('GPL-2.0-or-later')
+depends=(
+  sudo
+  # The installer hashes the lock-screen PIN with it; the PIN check uses it too.
+  openssl
+  python
+  # [orchard]'s, with the tablet patches.
+  labwc
+  wlroots0.20
+  quickshell
+  qt6-imageformats
+  # Background picker thumbnails and cache checks.
+  diffutils
+  libvips
+  ffmpegthumbnailer
+  foot
+  ttf-dejavu
+  ttf-jetbrains-mono-nerd
+  ttf-nerd-fonts-symbols
+  firefox
+  omafox
+  omactivity
+  # Files: Folio with touch mode, the file manager of every board.
+  folio-touch
+  fastfetch
+  starship
+  seatd
+  # Boot login: the touch PIN greeter on VT1.
+  greetd
+  networkmanager
+  iw
+  bluez
+  bluez-utils
+  upower
+  zram-generator
+  grim
+  wlr-randr
+  # Device orientation from the accelerometer.
+  iio-sensor-proxy
+  xdg-desktop-portal
+  xdg-desktop-portal-wlr
+  pipewire
+  pipewire-pulse
+  wireplumber
+  socat
+  jq
+  pango
+  cairo
+  wayland
+  # Removable storage mounted through the session identity.
+  udiskie
+  udisks2
+)
+# 64-bit: Mesa from OrchardLinux's fork and the VA-API bridge, both [orchard]'s;
+# Omacalc from upstream Omarchy's repository, signed with its key.
+depends_aarch64=(mesa libva-v4l2-request omarchy-keyring omacalc)
+# Upstream Omarchy publishes nothing for ARMv7: Omacalc is [orchard]'s.
+depends_armv7h=(omacalc)
+# The keyboard (wvkbd) and the cursor helper (wtype) are compiled in build().
+makedepends=(gcc make pkgconf patch wayland libxkbcommon pango cairo)
+# Upstream Omarchy's package has the same tree (/usr/share/omarchy).
+conflicts=(omarchy)
+install=omarchy-a.install
+_commit=0000000000000000000000000000000000000000
+_omarchy=3ac43659dcbf88e84d951e3ce979b48a60a7d1f2
+source=("omarchy-a-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz"
+        "wvkbd-0.20.tar.gz::https://git.sr.ht/~proycon/wvkbd/archive/v0.20.tar.gz"
+        "wtype-0.4.tar.gz::https://github.com/atx/wtype/archive/refs/tags/v0.4.tar.gz"
+        "https://files.pythonhosted.org/packages/d2/fc/c0a3f4c4eaa5a22fbef91713474666e13d0ea2a69c84532579490a9f2cc8/dbus_next-0.2.3-py3-none-any.whl"
+        "omarchy-${_omarchy}.tar.gz::https://github.com/omacom/omarchy/archive/${_omarchy}.tar.gz")
+# The first is omarchy-a's release (tools/pkgrepo bump writes it).
+sha256sums=('SKIP'
+            '330e7d41e2ccf3f984af701c0d055d919cff66710dfe05ce9d77e4ae6e1adc16'
+            'da91786d828b6a6e29b884bc510473939eda052658ebef87d7bdeafa6a8746f9'
+            '58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b'
+            '626f987ef800941b2d2915e9f13df84f984050b9fab178fb10f4c9afc9faba96')
+
+build() {
+  make -C "omarchy-a-${_commit}" WVKBD="${srcdir}/wvkbd-v0.20" WTYPE="${srcdir}/wtype-0.4"
+}
+
+package() {
+  make -C "omarchy-a-${_commit}" install DESTDIR="${pkgdir}" \
+    OMARCHY="${srcdir}/omarchy-${_omarchy}" DBUS_NEXT="${srcdir}"
+}

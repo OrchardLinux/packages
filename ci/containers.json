@@ -6,5 +6,11 @@
     "bootstrap": "https://github.com/OrchardLinux/omarchy-a/releases/download/armv7-bootstrap-20260805/ArchLinuxARM-armv7-20260805.tar.gz",
     "sha256": "ebe0fa119dea45e3af0aa61785676bdbf417bc5f754d529b87255dbf0ca4e3f0",
     "image": "localhost/archlinuxarm-armv7:20260805"
+  },
+  "alpine-aarch64": {
+    "image": "docker.io/library/alpine:3.24.3"
+  },
+  "alpine-armv7": {
+    "image": "docker.io/library/alpine:3.24.3"
   }
 }
