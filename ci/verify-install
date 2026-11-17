@@ -11,6 +11,6 @@ if [[ $base == alpine ]]; then
   "$here/container" "alpine-$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$download" \
     -- sh /repo/ci/container-verify-alpine
 else
-  "$here/container" "$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER="$download/repo-$arch" \
+  "$here/container" "$arch" -v "$(dirname "$here"):/repo:ro" -e ORCHARD_SERVER_BASE="$download" \
     -- bash /repo/ci/container-verify
 fi

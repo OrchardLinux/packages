@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Inside the Arch build container (ci/build-package starts it): build one package
-# with makepkg, as an unprivileged user, against a fully updated Arch.
+# with makepkg, as an unprivileged user, against a fully updated Arch, with the
+# repositories a tablet has: what a package needs from this repository (or
+# from upstream Omarchy's) comes from there, as on a tablet.
 #
 #   /repo    this repository, read-only
 #   /out     receives the package
@@ -8,8 +10,10 @@
 set -euo pipefail
 package=$1
 version=$2
-: "${ORCHARD_ARCH:?}"
+: "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER_BASE:?}"
 bash /repo/ci/prepare-pacman
+bash /repo/ci/tablet-repos /etc/pacman.conf "$ORCHARD_ARCH" "$ORCHARD_SERVER_BASE" --trust
+pacman -Sy
 tools=(base-devel git)
 [[ ! -d /ccache ]] || tools+=(ccache)
 pacman-download -S --noconfirm --needed "${tools[@]}"
@@ -44,9 +48,10 @@ as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER='
 cd "$build"
 test "$("${as_builder[@]}" bash -c 'source /etc/makepkg.conf; echo "$CARCH"')" = "$ORCHARD_ARCH"
 
-# What the recipe needs to build and to run, from Arch's signed packages.
+# What the recipe needs to build and to run, its own architecture's lists included
+# (depends_aarch64 and the like).
 mapfile -t needs < <("${as_builder[@]}" makepkg --printsrcinfo |
-  sed -n 's/^\t\(make\|check\)\?depends = //p' | sort -u)
+  sed -n "s/^\t\(make\|check\)\?depends\(_$ORCHARD_ARCH\)\? = //p" | sort -u)
 if (( ${#needs[@]} )); then
   pacman-download -S --noconfirm --needed --asdeps "${needs[@]}"
   pacman -S --noconfirm --needed --asdeps "${needs[@]}"
