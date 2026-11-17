@@ -1,0 +1,151 @@
+From 68376e5772dac475073d4e63a314e8f2a4c18155 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Berkay=20K=C3=B6sebay?= <brkosebay@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 17:16:03 +0100
+Subject: [PATCH] Hide the cursor until pointer input when configured
+
+Touch-only systems have no use for a cursor at startup. On outputs without a hardware cursor plane, a visible software cursor also prevents direct scanout until the first touch hides it.
+
+Add the opt-in core hideCursorUntilPointerInput setting, defaulting to no. Keep the cursor hidden at seat initialization, and hide it again on reconfiguration without pointer-capable devices or when the last such device is removed. Existing pointer input handlers still show it.
+
+Assisted-by: LLM
+---
+ docs/labwc-config.5.scd |  9 +++++++++
+ docs/rc.xml.all         |  1 +
+ include/config/rcxml.h  |  1 +
+ src/config/rcxml.c      |  3 +++
+ src/seat.c              | 26 +++++++++++++++++++++++++-
+ 5 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/docs/labwc-config.5.scd b/docs/labwc-config.5.scd
+index cf142cf..3aa3920 100644
+--- a/docs/labwc-config.5.scd
++++ b/docs/labwc-config.5.scd
+@@ -179,6 +179,7 @@ this is for compatibility with Openbox.
+   <reuseOutputMode>no</reuseOutputMode>
+   <xwaylandPersistence>no</xwaylandPersistence>
+   <primarySelection>yes</primarySelection>
++  <hideCursorUntilPointerInput>no</hideCursorUntilPointerInput>
+   <promptCommand>[see details below]</promptCommand>
+   <errorCommand>[see details below]</errorCommand>
+ </core>
+@@ -268,6 +269,14 @@ this is for compatibility with Openbox.
+ 	up/down) in Chromium and electron based clients without inadvertently
+ 	pasting the primary clipboard. Default is yes.
+ 
++*<core><hideCursorUntilPointerInput>* [yes|no]
++	Hide the cursor at startup until pointer motion, button, axis or gesture
++	input is received. This avoids showing a cursor on touch-only systems.
++	When enabled, the cursor is also hidden on reconfiguration if no
++	pointer-capable device is attached, and when the last such device is
++	removed. Pointer-capable devices include mice, touchpads and tablets.
++	Default is no.
++
+ *<core><promptCommand>*
+ 	Set command to be invoked for an action prompt (*<action><prompt>*)
+ 
+diff --git a/docs/rc.xml.all b/docs/rc.xml.all
+index 8e08432..ea42258 100644
+--- a/docs/rc.xml.all
++++ b/docs/rc.xml.all
+@@ -17,6 +17,7 @@
+     <reuseOutputMode>no</reuseOutputMode>
+     <xwaylandPersistence>no</xwaylandPersistence>
+     <primarySelection>yes</primarySelection>
++    <hideCursorUntilPointerInput>no</hideCursorUntilPointerInput>
+     <!--
+       # See labwc-config(5) for details
+       <promptCommand></promptCommand>
+diff --git a/include/config/rcxml.h b/include/config/rcxml.h
+index 6062ced..008ff53 100644
+--- a/include/config/rcxml.h
++++ b/include/config/rcxml.h
+@@ -86,6 +86,7 @@ struct rcxml {
+ 	uint32_t allowed_interfaces;
+ 	bool xwayland_persistence;
+ 	bool primary_selection;
++	bool hide_cursor_until_pointer_input;
+ 	bool startup_fade;
+ 	char *handover_dir;
+ 	bool startup_signal;
+diff --git a/src/config/rcxml.c b/src/config/rcxml.c
+index 4597d49..8a01e0c 100644
+--- a/src/config/rcxml.c
++++ b/src/config/rcxml.c
+@@ -1169,6 +1169,8 @@ entry(xmlNode *node, char *nodename, char *content)
+ 		set_bool(content, &rc.xwayland_persistence);
+ 	} else if (!strcasecmp(nodename, "primarySelection.core")) {
+ 		set_bool(content, &rc.primary_selection);
++	} else if (!strcasecmp(nodename, "hideCursorUntilPointerInput.core")) {
++		set_bool(content, &rc.hide_cursor_until_pointer_input);
+ 	} else if (!strcasecmp(nodename, "live.overview")) {
+ 		rc.overview_live = !strcasecmp(content, "auto")
+ 			? LAB_STATE_UNSPECIFIED : parse_tristate(content);
+@@ -1558,6 +1560,7 @@ rcxml_init(void)
+ 	rc.allowed_interfaces = UINT32_MAX;
+ 	rc.xwayland_persistence = false;
+ 	rc.primary_selection = true;
++	rc.hide_cursor_until_pointer_input = false;
+ 	rc.overview_live = LAB_STATE_UNSPECIFIED;
+ 	rc.overview_swipe = false;
+ 
+diff --git a/src/seat.c b/src/seat.c
+index fe85dc2..488bf3b 100644
+--- a/src/seat.c
++++ b/src/seat.c
+@@ -37,6 +37,20 @@
+ 	#define wlr_input_device_is_libinput(device) (false)
+ #endif
+ 
++static bool
++seat_has_pointer_device(struct seat *seat)
++{
++	struct input *input;
++	wl_list_for_each(input, &seat->inputs, link) {
++		/* Match the devices that provide WL_SEAT_CAPABILITY_POINTER. */
++		if (input->wlr_input_device->type == WLR_INPUT_DEVICE_POINTER
++				|| input->wlr_input_device->type == WLR_INPUT_DEVICE_TABLET) {
++			return true;
++		}
++	}
++	return false;
++}
++
+ static void
+ input_device_destroy(struct wl_listener *listener, void *data)
+ {
+@@ -44,6 +58,13 @@ input_device_destroy(struct wl_listener *listener, void *data)
+ 	wl_list_remove(&input->link);
+ 	wl_list_remove(&input->destroy.link);
+ 
++	if (rc.hide_cursor_until_pointer_input
++			&& (input->wlr_input_device->type == WLR_INPUT_DEVICE_POINTER
++				|| input->wlr_input_device->type == WLR_INPUT_DEVICE_TABLET)
++			&& !seat_has_pointer_device(input->seat)) {
++		cursor_set_visible(input->seat, false);
++	}
++
+ 	/* `struct keyboard` is derived and has some extra clean up to do */
+ 	if (input->wlr_input_device->type == WLR_INPUT_DEVICE_KEYBOARD) {
+ 		struct keyboard *keyboard = (struct keyboard *)input;
+@@ -673,7 +694,7 @@ seat_init(void)
+ 	seat->input_method_relay = input_method_relay_create(seat);
+ 
+ 	seat->xcursor_manager = NULL;
+-	seat->cursor_visible = true;
++	seat->cursor_visible = !rc.hide_cursor_until_pointer_input;
+ 	seat->cursor = wlr_cursor_create();
+ 	if (!seat->cursor) {
+ 		wlr_log(WLR_ERROR, "unable to create cursor");
+@@ -751,6 +772,9 @@ seat_reconfigure(void)
+ 	struct seat *seat = &server.seat;
+ 	struct input *input;
+ 	cursor_reload(seat);
++	if (rc.hide_cursor_until_pointer_input && !seat_has_pointer_device(seat)) {
++		cursor_set_visible(seat, false);
++	}
+ 	overlay_finish(seat);
+ 	keyboard_reset_current_keybind();
+ 	wl_list_for_each(input, &seat->inputs, link) {
+-- 
+2.49.0
+
