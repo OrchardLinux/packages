@@ -14,6 +14,9 @@ for arch in aarch64 armv7h; do
   mkdir -p "$root/var/lib/pacman" "$root/cache"
   sed "s/^#\?Architecture *=.*/Architecture = $arch/" /etc/pacman.conf > "$root/pacman.conf"
   sed -i "/^\[core\]/i [orchard]\nSigLevel = Optional TrustAll\nServer = $ORCHARD_SERVER_BASE/repo-$arch\n" "$root/pacman.conf"
+  # 64-bit tablets list upstream Omarchy's repository too (omarchy-a takes Omacalc from it).
+  [[ $arch != aarch64 ]] ||
+    sed -i "/^\[core\]/i [omarchy]\nServer = https://pkgs.omarchy.org/stable/\$arch\n" "$root/pacman.conf"
   pacman=(pacman --config "$root/pacman.conf" --root "$root" --dbpath "$root/var/lib/pacman"
     --cachedir "$root/cache" --noconfirm)
   # A mirror that does not answer is an error of this run, not a broken package.

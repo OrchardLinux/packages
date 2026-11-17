@@ -209,7 +209,7 @@ def plan(args):
     for base, row in BASES.items():
         for arch in row['arches']:
             wanted = [name for name in names(base) if not args.package or name == args.package]
-            wanted = [name for name in wanted if arch in recipe(name, base)['arch']]
+            wanted = [name for name in wanted if arch in recipe(name, base)['arch'] and not waiting(name)]
             if not wanted:
                 continue
             index, recorded = published(arch, base), state(arch, base)
@@ -238,6 +238,12 @@ def plan(args):
             stream.write(lines)
     else:
         sys.stdout.write(lines)
+
+
+def waiting(name):
+    """A package that follows its source's releases and has none pinned yet (omarchy-a before its first)."""
+    source = pin(name)
+    return source.get('track') == 'releases' and 'tag' not in source
 
 
 def record(args):
@@ -325,11 +331,18 @@ def bump_one(name, tag=None):
         text, count = re.subn(pattern, value, text, flags=re.M)
         if count != 1:
             fail(f'{name}: the recipe has no single line for {pattern}')
-    if text.count(source['sha256']) != 1:
+    if 'sha256' not in source:
+        # The first release of a package that waited for one: its archive is the first source.
+        text, count = re.subn(r"^sha256sums=\('[^']*'", f"sha256sums=('{digest}'", text, flags=re.M)
+        if count != 1:
+            fail(f'{name}: the recipe has no single first checksum to pin')
+    elif text.count(source['sha256']) != 1:
         fail(f'{name}: the recipe does not name the old archive checksum once')
-    path.write_text(text.replace(source['sha256'], digest))
+    else:
+        text = text.replace(source['sha256'], digest)
+    path.write_text(text)
     (PACKAGES / name / 'source.json').write_text(json.dumps(updated, indent=2) + '\n')
-    print(f'{name}: {repository} {source.get("tag") or source["commit"][:11]} -> {new}')
+    print(f'{name}: {repository} {source.get("tag") or source.get("commit", "none")[:11]} -> {new}')
     return True
 
 

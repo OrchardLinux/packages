@@ -27,6 +27,7 @@ built for both.
 | `folio-touch` | yes | yes | Files: Folio with touch mode, from the `touch-mode` branch of [OrchardLinux/folio](https://github.com/OrchardLinux/folio), pinned to a commit until the fork tags a release newer than 0.4.0 (`v0.4.1`; its tag `a0.2.0-1` is no version tag). Provides `folio` and conflicts with upstream Omarchy's. |
 | `omafox` | yes | yes | Firefox follows the Omarchy theme. |
 | `omacalc` | - | yes | Omarchy's calculator, which upstream Omarchy publishes for 64-bit only. |
+| `omarchy-a` | yes | yes | Omarchy A's own files: the touch desktop, its configuration and system defaults, from [OrchardLinux/omarchy-a](https://github.com/OrchardLinux/omarchy-a), built with its Makefile. Follows its releases; nothing is built until its first release that builds this way. Conflicts with upstream Omarchy's `omarchy`. |
 | `linux-orchard-apple-16k`, `linux-orchard-apple-4k` | yes | - | orchard's kernel, modules, the boards' device trees, initrd and hardware defaults for A9 and later (16 KiB pages) or A7 to A8X: an orchard release's platform layer, installed unchanged by a plain PKGBUILD and APKBUILD; orchard's installer installs this package. Its pacman hooks (apk: scripts and trigger) run orchard's `boot-entries`, which keeps the system's boot entries current and the previous kernel as a fallback. The two conflict. |
 | `linux-orchard-apple-armv7` | - | yes | The same for the 32-bit boards (Alpine: `armv7`). |
 

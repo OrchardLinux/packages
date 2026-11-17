@@ -72,6 +72,46 @@ class Recipes(unittest.TestCase):
         self.assertGreater(pkgrepo.vercmp('27.0.0', '27.0.0.dev.232935.g2c1aa767d8d'), 0)
         self.assertEqual(pkgrepo.vercmp('1.2', '1.2'), 0)
 
+    def test_omarchy_a_follows_its_releases(self):
+        self.assertEqual(pkgrepo.bases('omarchy-a'), ['arch'])
+        self.assertEqual(pkgrepo.recipe('omarchy-a')['arch'], ['aarch64', 'armv7h'])
+        self.assertEqual(pkgrepo.pin('omarchy-a')['track'], 'releases')
+        text = pkgrepo.recipe('omarchy-a')['text']
+        # omarchy-a's image build replaces _commit, pkgver and the first source and checksum.
+        for key in ('pkgver', '_commit', 'source', 'sha256sums'):
+            self.assertEqual(len(pkgrepo.re.findall(rf'^{key}=.*$', text, pkgrepo.re.M)), 1, key)
+        self.assertRegex(text, r'(?m)^source=\("omarchy-a-\$\{_commit\}\.tar\.gz::\$\{url\}/archive/\$\{_commit\}\.tar\.gz"$')
+        self.assertRegex(text, r"(?m)^sha256sums=\('[^']+'$")
+        # makepkg alone: make, no omarchy-a tooling.
+        self.assertIn('make -C "omarchy-a-${_commit}" install', text)
+        self.assertNotIn('release.package', text)
+        self.assertNotIn('python3', text.split('build()')[1])
+
+    def test_omarchy_a_waits_for_its_first_release_then_bump_pins_it(self):
+        self.assertTrue(pkgrepo.waiting('omarchy-a'))
+        commit = 'c' * 40
+        archive = b'omarchy-a v0.4.0'
+        digest = hashlib.sha256(archive).hexdigest()
+        replies = {'repos/OrchardLinux/omarchy-a/releases/latest': {'tag_name': 'v0.4.0'},
+                   'repos/OrchardLinux/omarchy-a/commits/v0.4.0': {'sha': commit}}
+        with tempfile.TemporaryDirectory() as directory:
+            packages = Path(directory) / 'packages'
+            shutil.copytree(ROOT / 'packages/omarchy-a', packages / 'omarchy-a')
+            with mock.patch.object(pkgrepo, 'PACKAGES', packages), \
+                    mock.patch.object(pkgrepo, 'api', lambda path: replies[path]), \
+                    mock.patch.object(pkgrepo, 'fetch', return_value=archive) as fetch, \
+                    mock.patch('sys.stdout', io.StringIO()):
+                self.assertTrue(pkgrepo.bump_one('omarchy-a'))
+                self.assertEqual(pkgrepo.recipe('omarchy-a')['version'], '0.4.0-1')
+                self.assertFalse(pkgrepo.waiting('omarchy-a'))
+                pkgrepo.check()
+            fetch.assert_called_once_with(f'https://github.com/OrchardLinux/omarchy-a/archive/{commit}.tar.gz')
+            text = (packages / 'omarchy-a/arch/PKGBUILD').read_text()
+            self.assertIn(f"_commit={commit}\n", text)
+            self.assertIn(f"sha256sums=('{digest}'\n", text)
+            # The other sources keep their checksums.
+            self.assertIn("'330e7d41e2ccf3f984af701c0d055d919cff66710dfe05ce9d77e4ae6e1adc16'", text)
+
     def test_a_newer_commit_is_a_newer_version(self):
         source = {'version': '27.0.0-devel', 'revision': 232935, 'commit': '2c1aa767d8d8836739260177144716271e05f686'}
         self.assertEqual(pkgrepo.tracked_pkgver(source), '27.0.0.dev.232935.g2c1aa767d8d')
@@ -104,6 +144,13 @@ class Plan(unittest.TestCase):
         # orchard's kernel packages wait for an orchard release with kernel packages.
         self.assertIn(('linux-orchard-apple-armv7', 'alpine', 'armv7'), builds)
         self.assertIn({'base': 'alpine', 'arch': 'armv7'}, pkgrepo.json.loads(result['targets']))
+
+    def test_a_package_waiting_for_its_first_release_is_not_built(self):
+        builds = {b['package'] for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
+        self.assertNotIn('omarchy-a', builds)
+        with mock.patch.object(pkgrepo, 'waiting', lambda name: False):
+            builds = {(b['package'], b['arch']) for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
+        self.assertLessEqual({('omarchy-a', 'aarch64'), ('omarchy-a', 'armv7h')}, builds)
 
     def test_nothing_builds_when_every_version_is_published(self):
         result = self.plan(self.everything())
