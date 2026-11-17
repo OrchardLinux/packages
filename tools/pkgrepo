@@ -2,19 +2,30 @@
 """The package repository's bookkeeping: what to build, and moving source pins.
 
   pkgrepo check                       every recipe agrees with its source pin
-  pkgrepo plan [--package NAME]       which packages the published repository lacks (JSON for CI)
-  pkgrepo record STATE NAME...        note the recipes the named packages were built from in STATE
-  pkgrepo bump [--repository R --commit SHA] [--package NAME]
-                                      move tracked pins to their source's newest commit
+  pkgrepo plan [--package NAME]       which packages the published repositories lack (JSON for CI)
+  pkgrepo record [--base B] STATE NAME...
+                                      note the recipes the named packages were built from in STATE
+  pkgrepo bump [--repository R] [--package NAME] [--tag TAG]
+                                      move pins to their source's newest release
   pkgrepo rebuild [--published-only] NAME...
                                       raise pkgrel: same source, built again
-  pkgrepo prune --index DB... --assets FILE...
+  pkgrepo prune [--base B] --index DB... --assets FILE...
                                       which published package files no given index names any more
+  pkgrepo files --base B INDEX        the package files an index names, one per line
+  pkgrepo orchard-release VERSION     the kernel packages to orchard's release VERSION (pkgver, checksums)
 
-Standard library only. A recipe (packages/NAME/pacman/PKGBUILD) states epoch,
-pkgver, pkgrel and arch as plain assignments; they are read here without bash.
+Standard library only. Recipes are per base: packages/NAME/arch/PKGBUILD
+(Arch Linux ARM, pacman) and packages/NAME/alpine/APKBUILD (Alpine, apk). They
+state pkgname, pkgver, pkgrel (and epoch) and arch as plain assignments; they
+are read here without a shell.
+
+Packages publish for releases of their sources only: `bump` follows release
+tags. orchard's kernel packages (linux-orchard-PLATFORM) repack an orchard
+release's platform layer; `orchard-release` is their bump. pkgrepo only edits
+recipes: makepkg and abuild build them without it.
 """
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -28,28 +39,44 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / 'packages'
-ARCHES = ('aarch64', 'armv7h')
+# Each base: its recipe in a package's directory and the architectures it publishes.
+BASES = {'arch': {'recipe': 'arch/PKGBUILD', 'arches': ('aarch64', 'armv7h')},
+         'alpine': {'recipe': 'alpine/APKBUILD', 'arches': ('aarch64', 'armv7')}}
+ARCHES = BASES['arch']['arches']
 REPOSITORY = os.environ.get('GITHUB_REPOSITORY', 'OrchardLinux/packages')
 # Packages whose compile is long enough for a compiler cache to pay.
 CCACHE = {'mesa'}
+ORCHARD = 'OrchardLinux/orchard'
 
 
-def server(arch):
-    return f'https://github.com/{REPOSITORY}/releases/download/repo-{arch}'
+def tag(arch, base='arch'):
+    """The release that holds one repository. apk asks for SERVER/ARCH/APKINDEX.tar.gz, so an
+    apk repository is the release named after its architecture, below .../releases/download."""
+    return f'repo-{arch}' if base == 'arch' else arch
+
+
+def server(arch, base='arch'):
+    return f'https://github.com/{REPOSITORY}/releases/download/{tag(arch, base)}'
 
 
 def fail(message):
     sys.exit('pkgrepo: ' + message)
 
 
-def names():
-    return sorted(p.parent.parent.name for p in PACKAGES.glob('*/pacman/PKGBUILD'))
+def names(base=None):
+    """Packages with a recipe for BASE (any base by default)."""
+    recipes = [BASES[base]['recipe']] if base else [row['recipe'] for row in BASES.values()]
+    return sorted({p.parents[1].name for pattern in recipes for p in PACKAGES.glob('*/' + pattern)})
 
 
-def recipe(name):
-    path = PACKAGES / name / 'pacman/PKGBUILD'
+def bases(name):
+    return [base for base, row in BASES.items() if (PACKAGES / name / row['recipe']).is_file()]
+
+
+def recipe(name, base='arch'):
+    path = PACKAGES / name / BASES[base]['recipe']
     if not path.is_file():
-        fail(f'no recipe for {name}')
+        fail(f'no {base} recipe for {name}')
     text = path.read_text()
     fields = {}
     for key in ('pkgname', 'epoch', 'pkgver', 'pkgrel'):
@@ -59,23 +86,33 @@ def recipe(name):
         fields[key] = found[0][1] if found else None
     if fields['pkgname'] != name:
         fail(f'{name}: pkgname is {fields["pkgname"]}')
-    arch = re.findall(r'^arch=\(([^)]*)\)$', text, re.M)
+    arch = re.findall(r'^arch=\(([^)]*)\)$' if base == 'arch' else r'^arch="([^"]*)"$', text, re.M)
     if len(arch) != 1:
         fail(f'{name}: arch must be one plain assignment')
-    fields['arch'] = [a for a in re.findall(r'[a-z0-9_]+', arch[0]) if a in ARCHES]
+    fields['arch'] = [a for a in re.findall(r'[a-z0-9_]+', arch[0]) if a in BASES[base]['arches']]
     epoch = fields['epoch'] + ':' if fields['epoch'] else ''
-    fields['version'] = f'{epoch}{fields["pkgver"]}-{fields["pkgrel"]}'
+    if base == 'alpine':
+        if epoch:
+            fail(f'{name}: an APKBUILD has no epoch')
+        fields['version'] = f'{fields["pkgver"]}-r{fields["pkgrel"]}'
+    else:
+        fields['version'] = f'{epoch}{fields["pkgver"]}-{fields["pkgrel"]}'
     fields['text'] = text
+    fields['path'] = path
     return fields
 
 
-def recipe_digest(name):
-    """One digest over everything a package is built from: pin, patches, recipe."""
+def recipe_digest(name, base='arch'):
+    """One digest over everything a base's package is built from: pin, patches, its recipe."""
     digest = hashlib.sha256()
-    base = PACKAGES / name
-    # Not tests/: a test that changes does not change the package.
-    for path in sorted(p for p in base.rglob('*') if p.is_file() and p.relative_to(base).parts[0] != 'tests'):
-        digest.update(path.relative_to(base).as_posix().encode() + b'\0' +
+    directory = PACKAGES / name
+    # Not tests/ (a test that changes does not change the package), nor another base's recipe.
+    skip = {'tests'} | {other for other in BASES if other != base}
+    for path in sorted(p for p in directory.rglob('*') if p.is_file() and p.relative_to(directory).parts[0] not in skip):
+        relative = path.relative_to(directory).as_posix()
+        # The Arch recipes lived in pacman/ when the published digests were recorded.
+        relative = 'pacman/' + relative.removeprefix('arch/') if relative.startswith('arch/') else relative
+        digest.update(relative.encode() + b'\0' +
                       hashlib.sha256(path.read_bytes()).hexdigest().encode() + b'\n')
     return digest.hexdigest()
 
@@ -86,18 +123,25 @@ def pin(name):
 
 def check(_args=None):
     for name in names():
-        source, built = pin(name), recipe(name)
-        for key in ('sha256', 'commit'):
-            if key in source and source[key] not in built['text']:
-                fail(f'{name}: the recipe does not name the pinned {key} {source[key]}')
+        source = pin(name)
         if 'file' in source:
             path = PACKAGES / name / source['file']
             if hashlib.sha256(path.read_bytes()).hexdigest() != source['sha256']:
                 fail(f'{name}: {source["file"]} differs from its pin')
-        if 'track' in source and built['pkgver'] != tracked_pkgver(source):
-            fail(f'{name}: pkgver {built["pkgver"]} is not the pinned commit\'s {tracked_pkgver(source)}')
-        if not built['arch']:
-            fail(f'{name}: builds for none of {", ".join(ARCHES)}')
+        for base in bases(name):
+            built = recipe(name, base)
+            # pacman checks sha256, apk sha512: each recipe names the checksum its base uses.
+            for key in (('sha256', 'commit') if base == 'arch' else ('sha512', 'commit')):
+                if key in source and source[key] not in built['text']:
+                    fail(f'{name}: the {base} recipe does not name the pinned {key} {source[key]}')
+            if 'tag' in source and built['pkgver'] != release_pkgver(source['tag']):
+                fail(f'{name}: pkgver {built["pkgver"]} is not the pinned release\'s {release_pkgver(source["tag"])}')
+            elif 'tag' not in source and 'revision' in source and built['pkgver'] != tracked_pkgver(source):
+                fail(f'{name}: pkgver {built["pkgver"]} is not the pinned commit\'s {tracked_pkgver(source)}')
+            if 'orchard' in source and built['pkgver'] != source['orchard']:
+                fail(f'{name}: the {base} recipe is not orchard {source["orchard"]}')
+            if not built['arch']:
+                fail(f'{name}: the {base} recipe builds for none of {", ".join(BASES[base]["arches"])}')
     print('Recipes agree with their pins:', ', '.join(names()))
 
 
@@ -113,9 +157,19 @@ def fetch(url, *, token=True, binary=True, headers=False):
         return data if binary else data.decode()
 
 
-def entries(data):
-    """A pacman index's packages: {name: (version, file name)}."""
+def entries(data, base='arch'):
+    """An index's packages: {name: (version, file name)}. pacman's orchard.db, or apk's APKINDEX.tar.gz."""
     found = {}
+    if base == 'alpine':
+        # A signed APKINDEX is the signature's tar, then the index's, one gzip stream each.
+        with tarfile.open(fileobj=io.BytesIO(gzip.decompress(data)), ignore_zeros=True) as archive:
+            for member in archive:
+                if member.name == 'APKINDEX':
+                    for block in archive.extractfile(member).read().decode().split('\n\n'):
+                        fields = dict(line.split(':', 1) for line in block.splitlines() if ':' in line)
+                        if 'P' in fields and 'V' in fields:
+                            found[fields['P']] = (fields['V'], f'{fields["P"]}-{fields["V"]}.apk')
+        return found
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         for member in archive:
             if member.name.endswith('/desc'):
@@ -125,21 +179,24 @@ def entries(data):
     return found
 
 
-def published(arch):
-    """The published index of one architecture: {package name: version}."""
+INDEX = {'arch': 'orchard.db', 'alpine': 'APKINDEX.tar.gz'}
+
+
+def published(arch, base='arch'):
+    """The published index of one base and architecture: {package name: version}."""
     try:
-        data = fetch(server(arch) + '/orchard.db')
+        data = fetch(server(arch, base) + '/' + INDEX[base])
     except HTTPError as error:
         if error.code == 404:
             return {}
         raise
-    return {name: version for name, (version, _) in entries(data).items()}
+    return {name: version for name, (version, _) in entries(data, base).items()}
 
 
-def state(arch):
+def state(arch, base='arch'):
     """What the publish job recorded: {package name: {version, recipe}}."""
     try:
-        return json.loads(fetch(server(arch) + '/built.json'))
+        return json.loads(fetch(server(arch, base) + '/built.json'))
     except HTTPError as error:
         if error.code == 404:
             return {}
@@ -149,26 +206,31 @@ def state(arch):
 def plan(args):
     check()
     builds, changed = [], []
-    for arch in ARCHES:
-        index, recorded = published(arch), state(arch)
-        for name in names():
-            built = recipe(name)
-            if arch not in built['arch'] or (args.package and name != args.package):
+    for base, row in BASES.items():
+        for arch in row['arches']:
+            wanted = [name for name in names(base) if not args.package or name == args.package]
+            wanted = [name for name in wanted if arch in recipe(name, base)['arch']]
+            if not wanted:
                 continue
-            if index.get(name) != built['version']:
-                builds.append({'package': name, 'arch': arch, 'version': built['version'],
-                               'ccache': name in CCACHE})
-                print(f'build   {arch:8} {name} {built["version"]} (published: {index.get(name, "nothing")})',
-                      file=sys.stderr)
-            elif recorded.get(name, {}).get('recipe') not in (None, recipe_digest(name)):
-                changed.append(f'{name} ({arch})')
-            else:
-                print(f'current {arch:8} {name} {built["version"]}', file=sys.stderr)
+            index, recorded = published(arch, base), state(arch, base)
+            for name in wanted:
+                built = recipe(name, base)
+                where = f'{base}/{arch}'
+                if index.get(name) != built['version']:
+                    builds.append({'package': name, 'base': base, 'arch': arch, 'version': built['version'],
+                                   'ccache': name in CCACHE})
+                    print(f'build   {where:15} {name} {built["version"]} (published: {index.get(name, "nothing")})',
+                          file=sys.stderr)
+                elif recorded.get(name, {}).get('recipe') not in (None, recipe_digest(name, base)):
+                    changed.append(f'{name} ({where})')
+                else:
+                    print(f'current {where:15} {name} {built["version"]}', file=sys.stderr)
     if changed:
         fail('recipe, patches or pin changed but the version is already published: ' + ', '.join(changed) +
              '. Raise pkgrel (tools/pkgrepo rebuild NAME).')
+    targets = sorted({(b['base'], b['arch']) for b in builds})
     result = {'matrix': json.dumps({'include': builds}), 'any': 'true' if builds else 'false',
-              'arches': json.dumps(sorted({b['arch'] for b in builds}))}
+              'targets': json.dumps([{'base': base, 'arch': arch} for base, arch in targets])}
     lines = ''.join(f'{key}={value}\n' for key, value in result.items())
     output = os.environ.get('GITHUB_OUTPUT')
     if output:
@@ -183,7 +245,7 @@ def record(args):
     path = Path(args.state)
     recorded = json.loads(path.read_text()) if path.is_file() else {}
     for name in args.names:
-        recorded[name] = {'version': recipe(name)['version'], 'recipe': recipe_digest(name)}
+        recorded[name] = {'version': recipe(name, args.base)['version'], 'recipe': recipe_digest(name, args.base)}
     path.write_text(json.dumps(recorded, indent=2, sort_keys=True) + '\n')
 
 
@@ -203,73 +265,62 @@ def api(path):
     return json.loads(fetch('https://api.github.com/' + path))
 
 
-def release_order(tag):
-    return [int(part) for part in re.findall(r'\d+', tag)]
+def release_pkgver(tag):
+    """The package version of a release tag: v0.1.1 is 0.1.1."""
+    return tag.removeprefix('v')
 
 
-def upstream_version(source, commit):
-    """The upstream version a commit of the tracked branch stands for.
-
-    Either a file of the source states it ("version_file", with
-    "version_pattern"), or it is the newest release tag of the upstream
-    repository that the commit contains ("version_tags": for a fork that has
-    no version of its own in its source, like Folio's).
-    """
-    repository = source['repository']
-    if 'version_tags' in source:
-        tags = {tag['name']: tag['commit']['sha'] for tag in api(f'repos/{source["version_tags"]}/tags?per_page=100')
-                if re.fullmatch(r'v?\d+(\.\d+)*', tag['name'])}
-        for tag in sorted(tags, key=release_order, reverse=True):
-            try:
-                relation = api(f'repos/{repository}/compare/{tags[tag]}...{commit}')['status']
-            except HTTPError as error:
-                if error.code != 404:
-                    raise
-                continue  # a release the fork does not have: not in this commit
-            if relation in ('ahead', 'identical'):
-                return tag.removeprefix('v')
-        fail(f'{repository} {commit[:11]} contains no release tag of {source["version_tags"]}')
-    stated = fetch(f'https://raw.githubusercontent.com/{repository}/{commit}/{source.get("version_file", "VERSION")}',
-                   binary=False)
-    return re.search(source.get('version_pattern', r'^(.+)$'), stated, re.M).group(1).strip()
+def vercmp(left, right):
+    """pacman's version order, for the versions found here: < 0, 0 or > 0."""
+    a, b = re.findall(r'[0-9]+|[A-Za-z]+', left), re.findall(r'[0-9]+|[A-Za-z]+', right)
+    for x, y in zip(a, b):
+        if x.isdigit() and y.isdigit():
+            if int(x) != int(y):
+                return int(x) - int(y)
+        elif x.isdigit() != y.isdigit():
+            return 1 if x.isdigit() else -1
+        elif x != y:
+            return 1 if x > y else -1
+    if len(a) == len(b):
+        return 0
+    rest = (a if len(a) > len(b) else b)[min(len(a), len(b))]
+    # A longer version that goes on with a number is newer; with letters (rc1), older.
+    newer = rest.isdigit()
+    return (1 if newer else -1) * (1 if len(a) > len(b) else -1)
 
 
-def bump_one(name, commit=None):
+def bump_one(name, tag=None):
+    """Move a pin to its source's newest release (or TAG), if that is newer than the pinned version."""
     source = pin(name)
-    repository, branch, old = source['repository'], source['track'], source['commit']
-    head = api(f'repos/{repository}/commits/{branch}')['sha']
-    new = commit or head
-    if not re.fullmatch(r'[0-9a-f]{40}', new):
-        fail(f'{name}: not a commit ID: {new}')
-    if new == old:
-        print(f'{name}: {repository} {branch} is still {old[:11]}')
+    repository = source['repository']
+    try:
+        release = api(f'repos/{repository}/releases/' + (f'tags/{tag}' if tag else 'latest'))
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        print(f'{name}: {repository} has no release{" " + tag if tag else ""}; nothing to do')
         return False
-    # GitHub serves commits of forks under the parent's name: only a commit
-    # that the tracked branch contains, and that continues the pinned one.
-    if new != head and api(f'repos/{repository}/compare/{new}...{branch}')['status'] not in ('ahead', 'identical'):
-        fail(f'{name}: {new} is not on {repository} {branch}')
-    relation = api(f'repos/{repository}/compare/{old}...{new}')['status']
-    if relation == 'behind':
-        print(f'{name}: {new[:11]} is older than the pinned {old[:11]}; nothing to do')
+    new = release['tag_name']
+    if new == source.get('tag'):
+        print(f'{name}: {repository} {new} is still the newest release')
         return False
-    _, headers = fetch(f'https://api.github.com/repos/{repository}/commits?sha={new}&per_page=1', headers=True)
-    last = re.search(r'[?&]page=(\d+)>; rel="last"', headers.get('Link', ''))
-    revision = int(last.group(1)) if last else 1
-    # A branch that is rebased onto its upstream (a fork kept as patches) does
-    # not continue its old commits; it is followed while its commits still
-    # count upwards, so that the package version does.
-    if relation == 'diverged' and source.get('rebased') and revision > source['revision']:
-        relation = 'ahead'
-    if relation != 'ahead':
-        fail(f'{name}: {new[:11]} does not continue the pinned {old[:11]} ({relation}); '
-             f'{repository} {branch} was rewritten, move the pin by hand')
-    version = upstream_version(source, new)
-    url = f'https://github.com/{repository}/archive/{new}.tar.gz'
-    digest = hashlib.sha256(fetch(url)).hexdigest()
-    path = PACKAGES / name / 'pacman/PKGBUILD'
+    if not re.fullmatch(r'v?[0-9]+(\.[0-9]+)*', new):
+        print(f'{name}: {repository} release {new} is not a version tag (v1.2.3); nothing to do')
+        return False
+    if bases(name) != ['arch']:
+        fail(f'{name}: bump moves Arch recipes only; move the other bases\' by hand')
+    path = PACKAGES / name / BASES['arch']['recipe']
     text = path.read_text()
-    updated = dict(source, version=version, commit=new, revision=revision, url=url, sha256=digest)
-    for pattern, value in ((r'^_commit=.*$', '_commit=' + new), (r'^pkgver=.*$', 'pkgver=' + tracked_pkgver(updated)),
+    current = recipe(name)['pkgver']
+    if vercmp(release_pkgver(new), current) <= 0:
+        print(f'{name}: {repository} {new} is not newer than the published {current}; staying')
+        return False
+    commit = api(f'repos/{repository}/commits/{new}')['sha']
+    url = f'https://github.com/{repository}/archive/{commit}.tar.gz'
+    digest = hashlib.sha256(fetch(url)).hexdigest()
+    updated = {key: value for key, value in source.items() if key not in ('revision', 'rebased', 'track')}
+    updated.update(track='releases', tag=new, version=release_pkgver(new), commit=commit, url=url, sha256=digest)
+    for pattern, value in ((r'^_commit=.*$', '_commit=' + commit), (r'^pkgver=.*$', 'pkgver=' + release_pkgver(new)),
                            (r'^pkgrel=.*$', 'pkgrel=1')):
         text, count = re.subn(pattern, value, text, flags=re.M)
         if count != 1:
@@ -278,21 +329,22 @@ def bump_one(name, commit=None):
         fail(f'{name}: the recipe does not name the old archive checksum once')
     path.write_text(text.replace(source['sha256'], digest))
     (PACKAGES / name / 'source.json').write_text(json.dumps(updated, indent=2) + '\n')
-    print(f'{name}: {repository} {old[:11]} -> {new[:11]} ({tracked_pkgver(updated)})')
+    print(f'{name}: {repository} {source.get("tag") or source["commit"][:11]} -> {new}')
     return True
 
 
 def bump(args):
-    if args.commit and not args.repository and not args.package:
-        fail('--commit needs --repository or --package')
+    if args.tag and not args.repository and not args.package:
+        fail('--tag needs --repository or --package')
     moved = []
     for name in names():
         source = pin(name)
+        # "track" names the branch a pin was first taken from; pins move to releases only.
         if 'track' not in source or (args.package and name != args.package):
             continue
         if args.repository and source['repository'].lower() != args.repository.lower():
             continue
-        if bump_one(name, args.commit):
+        if bump_one(name, args.tag):
             moved.append(name)
     check()
     output = os.environ.get('GITHUB_OUTPUT')
@@ -303,15 +355,16 @@ def bump(args):
 
 def rebuild(args):
     for name in args.names:
-        built = recipe(name)
-        if args.published_only and not any(
-                published(arch).get(name) == built['version'] for arch in built['arch']):
-            fail(f'{name} {built["version"]} is not published: an earlier rebuild is still building or failed')
-        parts = built['pkgrel'].split('.')
-        parts[-1] = str(int(parts[-1]) + 1)
-        path = PACKAGES / name / 'pacman/PKGBUILD'
-        path.write_text(re.sub(r'^pkgrel=.*$', 'pkgrel=' + '.'.join(parts), built['text'], flags=re.M))
-        print(f'{name}: pkgrel {built["pkgrel"]} -> {".".join(parts)}')
+        for base in bases(name):
+            built = recipe(name, base)
+            if args.published_only and not any(
+                    published(arch, base).get(name) == built['version'] for arch in built['arch']):
+                fail(f'{name} {built["version"]} ({base}) is not published: an earlier rebuild is still '
+                     'building or failed')
+            parts = built['pkgrel'].split('.')
+            parts[-1] = str(int(parts[-1]) + 1)
+            built['path'].write_text(re.sub(r'^pkgrel=.*$', 'pkgrel=' + '.'.join(parts), built['text'], flags=re.M))
+            print(f'{name} ({base}): pkgrel {built["pkgrel"]} -> {".".join(parts)}')
 
 
 def prune(args):
@@ -322,10 +375,57 @@ def prune(args):
     keep = set()
     for path in args.index:
         if Path(path).is_file():
-            keep |= {filename for _, filename in entries(Path(path).read_bytes()).values()}
+            keep |= {filename for _, filename in entries(Path(path).read_bytes(), args.base).values()}
     for asset in args.assets:
-        if '.pkg.tar.' in asset and asset.removesuffix('.sig') not in keep:
+        package = '.pkg.tar.' in asset if args.base == 'arch' else asset.endswith('.apk')
+        if package and asset.removesuffix('.sig') not in keep:
             print(asset)
+
+
+def files(args):
+    for _, filename in sorted(entries(Path(args.index).read_bytes(), args.base).values()):
+        print(filename)
+
+
+def orchard_release(args):
+    """The kernel packages (source.json "orchard") to an orchard release: pkgver, pkgrel and checksums.
+
+    A release of orchard is this one bump. Each package repacks its platform's layer, an
+    asset of that release, unchanged; its sha256 comes from the release's SHA256SUMS and
+    is checked against the download, which also gives apk's sha512.
+    """
+    version = args.version.removeprefix('v')
+    if not re.fullmatch(r'[0-9]+(\.[0-9]+)*', version):
+        fail(f'not an orchard release version: {args.version}')
+    base_url = f'https://github.com/{ORCHARD}/releases/download/v{version}'
+    sums = {}
+    for line in fetch(base_url + '/SHA256SUMS', binary=False).splitlines():
+        digest, _, filename = line.partition('  ')
+        sums[filename.removeprefix('./')] = digest
+    for name in names():
+        source = pin(name)
+        if 'orchard' not in source:
+            continue
+        asset = source['asset']
+        if asset not in sums:
+            fail(f'{name}: orchard v{version} has no {asset}')
+        data = fetch(f'{base_url}/{asset}')
+        if hashlib.sha256(data).hexdigest() != sums[asset]:
+            fail(f'{name}: {asset} differs from orchard v{version}\'s SHA256SUMS')
+        updated = dict(source, orchard=version, sha256=sums[asset], sha512=hashlib.sha512(data).hexdigest())
+        for base in bases(name):
+            built = recipe(name, base)
+            text = built['text']
+            key = 'sha256' if base == 'arch' else 'sha512'
+            if text.count(source[key]) != 1:
+                fail(f'{name}: the {base} recipe does not name the old {key} once')
+            text = text.replace(source[key], updated[key])
+            text = re.sub(r'^pkgver=.*$', 'pkgver=' + version, text, flags=re.M)
+            text = re.sub(r'^pkgrel=.*$', 'pkgrel=' + ('1' if base == 'arch' else '0'), text, flags=re.M)
+            built['path'].write_text(text)
+        (PACKAGES / name / 'source.json').write_text(json.dumps(updated, indent=2) + '\n')
+        print(f'{name}: orchard {source["orchard"]} -> {version}')
+    check()
 
 
 def main():
@@ -336,12 +436,13 @@ def main():
     sub.add_argument('--package')
     sub.set_defaults(run=plan)
     sub = commands.add_parser('record')
+    sub.add_argument('--base', choices=sorted(BASES), default='arch')
     sub.add_argument('state')
     sub.add_argument('names', nargs='+')
     sub.set_defaults(run=record)
     sub = commands.add_parser('bump')
     sub.add_argument('--repository')
-    sub.add_argument('--commit')
+    sub.add_argument('--tag')
     sub.add_argument('--package')
     sub.set_defaults(run=bump)
     sub = commands.add_parser('rebuild')
@@ -350,9 +451,17 @@ def main():
     sub.add_argument('names', nargs='+')
     sub.set_defaults(run=rebuild)
     sub = commands.add_parser('prune')
+    sub.add_argument('--base', choices=sorted(BASES), default='arch')
     sub.add_argument('--index', nargs='+', required=True)
     sub.add_argument('--assets', nargs='*', default=[])
     sub.set_defaults(run=prune)
+    sub = commands.add_parser('files')
+    sub.add_argument('--base', choices=sorted(BASES), default='arch')
+    sub.add_argument('index')
+    sub.set_defaults(run=files)
+    sub = commands.add_parser('orchard-release')
+    sub.add_argument('version')
+    sub.set_defaults(run=orchard_release)
     args = parser.parse_args()
     args.run(args)
 

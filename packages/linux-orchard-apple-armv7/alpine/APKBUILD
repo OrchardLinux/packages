@@ -1,0 +1,30 @@
+# orchard's kernel for apple-armv7: an orchard release's platform layer, unchanged
+# (kernel, modules, the boards' device trees, orchard's initrd, hardware defaults
+# and /usr/lib/orchard/boot-entries), with the apk scripts and trigger that run
+# boot-entries. Plain abuild builds it. A release of orchard is a new pkgver and
+# checksum (`tools/pkgrepo orchard-release VERSION` writes both).
+pkgname=linux-orchard-apple-armv7
+_platform=apple-armv7
+pkgver=0.3.1
+pkgrel=0
+pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple 32-bit SoCs (A5 to A6X)"
+url="https://github.com/OrchardLinux/orchard"
+arch="armv7"
+license="GPL-2.0-only AND ISC"
+# It carries the regulatory database.
+replaces="wireless-regdb"
+options="!check !strip !tracedeps"
+install="$pkgname.pre-upgrade $pkgname.pre-deinstall"
+triggers="$pkgname.trigger=/usr/lib/modules/*:/usr/share/orchard:/usr/lib/orchard"
+source="platform-$_platform-$pkgver.tar.gz::$url/releases/download/v$pkgver/platform-$_platform.tar.gz"
+builddir="$srcdir"
+
+package() {
+	# abuild unpacked the layer into $srcdir: its usr/ is the package.
+	mkdir -p "$pkgdir"
+	cp -a "$srcdir"/usr "$pkgdir"/
+}
+
+sha512sums="
+df314d30fa1b37bb72689317ff54bfed7c4c4c473b86b47e76606d9d2f82dbd8d6e7a52977149610ef39fd3f8187faaea01f26bbc5bd85a8d3599c2342bbf52b  platform-$_platform-$pkgver.tar.gz
+"

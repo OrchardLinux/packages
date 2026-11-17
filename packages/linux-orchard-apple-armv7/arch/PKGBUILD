@@ -1,0 +1,30 @@
+# orchard's kernel for apple-armv7: an orchard release's platform layer, unchanged
+# (kernel, modules, the boards' device trees, orchard's initrd, hardware defaults
+# and /usr/lib/orchard/boot-entries), with the pacman hooks that run boot-entries.
+# Plain makepkg builds it; nothing is compiled. A release of orchard is a new pkgver
+# and checksum (`tools/pkgrepo orchard-release VERSION` writes both for every kernel package).
+
+pkgname=linux-orchard-apple-armv7
+_platform=apple-armv7
+pkgver=0.3.1
+pkgrel=1
+pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple 32-bit SoCs (A5 to A6X)"
+arch=('armv7h')
+url='https://github.com/OrchardLinux/orchard'
+license=('GPL-2.0-only' 'ISC')
+# One platform per system: the platforms' packages share the hardware defaults.
+provides=('linux-orchard' 'wireless-regdb')
+conflicts=('linux-orchard' 'wireless-regdb')
+options=('!strip' '!debug')
+source=("platform-${_platform}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/platform-${_platform}.tar.gz"
+        '05-orchard-boot-entries-save.hook'
+        '95-orchard-boot-entries.hook')
+noextract=("platform-${_platform}-${pkgver}.tar.gz")
+sha256sums=('150c52e023d68a6d638271ac01558bb49f3da2d64868486f665e08c70c9562e3'
+            'e8933219691a50afe1d6943fae2df044a2c2fc3017b507f1a4e704cf0842615b'
+            'fcc8693f613532d57e20f01512413b5572498af863b794750b4dd6fcff28ca2c')
+
+package() {
+    bsdtar -xpf "platform-${_platform}-${pkgver}.tar.gz" -C "$pkgdir"
+    install -Dm644 -t "$pkgdir/usr/share/libalpm/hooks" 05-orchard-boot-entries-save.hook 95-orchard-boot-entries.hook
+}

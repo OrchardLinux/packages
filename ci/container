@@ -4,11 +4,14 @@
 #
 #   ci/container ARCH [DOCKER-RUN-OPTIONS... --] COMMAND...
 #
-# aarch64 is a pinned image. armv7h is Arch Linux ARM's official root archive
-# of one dated build (the copy omarchy-a keeps in its releases, which verified
-# its signature), imported once per host and run by the 64-bit kernel's 32-bit
-# mode: no emulation. Inside, `uname -m` then says armv8l, so the scripts in
-# this directory name the architecture themselves.
+# ARCH is a base's architecture: aarch64 or armv7h (Arch Linux ARM), or
+# alpine-aarch64 or alpine-armv7 (Alpine's official image, the same release
+# minimal-linux builds on). aarch64 is a pinned image. armv7h is Arch Linux
+# ARM's official root archive of one dated build (the copy omarchy-a keeps in
+# its releases, which verified its signature), imported once per host. 32-bit
+# containers run in the 64-bit kernel's 32-bit mode: no emulation. Inside,
+# `uname -m` then says armv8l, so the scripts in this directory name the
+# architecture themselves (ORCHARD_ARCH, without the base).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 arch=$1; shift
@@ -30,7 +33,9 @@ case "$arch" in
       docker import --platform "$platform" "$archive" "$image" >/dev/null
       rm -f -- "$archive"
     fi ;;
+  alpine-aarch64) platform=linux/arm64; wrap=() ;;
+  alpine-armv7) platform=linux/arm/v7; wrap=(linux32) ;;
   *) echo "ci/container: unknown architecture $arch" >&2; exit 2 ;;
 esac
-exec docker run --rm --platform "$platform" -e ORCHARD_ARCH="$arch" -e RANK_MIRRORS_ARCH="$arch" \
+exec docker run --rm --platform "$platform" -e ORCHARD_ARCH="${arch#alpine-}" -e RANK_MIRRORS_ARCH="$arch" \
   "${options[@]}" "$image" "${wrap[@]}" "$@"

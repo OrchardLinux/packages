@@ -1,0 +1,13 @@
+# Before pacman replaces or removes orchard's kernel: keep its modules aside, so
+# the kernel that boots today stays as the fallback entry. The same script on
+# every base (orchard docs/boot-contract.md, Kernel updates).
+[Trigger]
+Type = Path
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Keeping the current kernel as the fallback...
+When = PreTransaction
+Exec = /bin/sh -c '[ ! -x /usr/lib/orchard/boot-entries ] || exec /usr/lib/orchard/boot-entries save'

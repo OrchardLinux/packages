@@ -1,0 +1,32 @@
+# orchard's kernel for apple-4k: an orchard release's platform layer, unchanged
+# (kernel, modules, the boards' device trees, orchard's initrd, hardware defaults
+# and /usr/lib/orchard/boot-entries), with the apk scripts and trigger that run
+# boot-entries. Plain abuild builds it. A release of orchard is a new pkgver and
+# checksum (`tools/pkgrepo orchard-release VERSION` writes both).
+pkgname=linux-orchard-apple-4k
+_platform=apple-4k
+pkgver=0.3.1
+pkgrel=0
+pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple A7, A8 and A8X"
+url="https://github.com/OrchardLinux/orchard"
+arch="aarch64"
+license="GPL-2.0-only AND ISC"
+# One platform per system: the platforms' packages share the hardware defaults.
+depends="!linux-orchard-apple-16k"
+# It carries the regulatory database.
+replaces="wireless-regdb"
+options="!check !strip !tracedeps"
+install="$pkgname.pre-upgrade $pkgname.pre-deinstall"
+triggers="$pkgname.trigger=/usr/lib/modules/*:/usr/share/orchard:/usr/lib/orchard"
+source="platform-$_platform-$pkgver.tar.gz::$url/releases/download/v$pkgver/platform-$_platform.tar.gz"
+builddir="$srcdir"
+
+package() {
+	# abuild unpacked the layer into $srcdir: its usr/ is the package.
+	mkdir -p "$pkgdir"
+	cp -a "$srcdir"/usr "$pkgdir"/
+}
+
+sha512sums="
+e3d71ae75d74bb0ba8cb13f8679530dc2f8d702262df97cffd226194abfe03cd8d905264a7bf7ec39e21a3c641745506e49537b612d6790ddc6066f732da95b7  platform-$_platform-$pkgver.tar.gz
+"

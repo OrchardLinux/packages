@@ -1,0 +1,5 @@
+#!/bin/sh
+# Before apk replaces or removes orchard's kernel: keep its modules aside, so the
+# kernel that boots today stays as the fallback entry (orchard docs/boot-contract.md).
+[ ! -x /usr/lib/orchard/boot-entries ] || /usr/lib/orchard/boot-entries save
+exit 0

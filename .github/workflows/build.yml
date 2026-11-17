@@ -22,7 +22,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       any: ${{ steps.plan.outputs.any }}
-      arches: ${{ steps.plan.outputs.arches }}
+      targets: ${{ steps.plan.outputs.targets }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +35,7 @@ jobs:
   build:
     needs: plan
     if: needs.plan.outputs.any == 'true'
-    name: ${{ matrix.package }} (${{ matrix.arch }})
+    name: ${{ matrix.package }} (${{ matrix.base }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -52,15 +52,18 @@ jobs:
         id: ccache
         with:
           path: .ccache
-          key: ccache-${{ matrix.package }}-${{ matrix.arch }}-${{ hashFiles(format('packages/{0}/**', matrix.package)) }}
-          restore-keys: ccache-${{ matrix.package }}-${{ matrix.arch }}-
+          key: ccache-${{ matrix.package }}-${{ matrix.base }}-${{ matrix.arch }}-${{ hashFiles(format('packages/{0}/**', matrix.package)) }}
+          restore-keys: ccache-${{ matrix.package }}-${{ matrix.base }}-${{ matrix.arch }}-
       - name: Build
         env:
           CCACHE: ${{ matrix.ccache && '1' || '' }}
+          BASE: ${{ matrix.base }}
           PACKAGE: ${{ matrix.package }}
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ matrix.version }}
-        run: ci/build-package "$PACKAGE" "$ARCH" "$VERSION"
+          # Not set yet: apk packages are signed with a key made per build until it exists (docs/signing.md).
+          ORCHARD_APK_KEY: ${{ secrets.ORCHARD_APK_KEY }}
+        run: ci/build-package "$BASE" "$PACKAGE" "$ARCH" "$VERSION"
       - uses: actions/cache/save@v4
         if: matrix.ccache && steps.ccache.outputs.cache-hit != 'true'
         with:
@@ -68,8 +71,10 @@ jobs:
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
-          name: package-${{ matrix.arch }}-${{ matrix.package }}
-          path: out/*.pkg.tar.zst
+          name: package-${{ matrix.base }}-${{ matrix.arch }}-${{ matrix.package }}
+          path: |
+            out/*.pkg.tar.zst
+            out/*.apk
           compression-level: 0
           if-no-files-found: error
           retention-days: 2
@@ -100,21 +105,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Not set yet: the repository is unsigned until the key exists (docs/signing.md).
           ORCHARD_SIGNING_KEY: ${{ secrets.ORCHARD_SIGNING_KEY }}
+          ORCHARD_APK_KEY: ${{ secrets.ORCHARD_APK_KEY }}
         run: |
           mkdir -p artifacts
           ci/publish artifacts
-          if [[ -n $(find artifacts -name '*.pkg.tar.zst' -print -quit) ]]; then
+          if [[ -n $(find artifacts \( -name '*.pkg.tar.*' -o -name '*.apk' \) -print -quit) ]]; then
             echo published=true >> "$GITHUB_OUTPUT"
           fi
   verify:
-    # A fresh Arch Linux ARM system takes every package from the published repository.
+    # A fresh system of each base takes every package from the published repository.
     needs: [plan, publish]
     if: ${{ !cancelled() && needs.publish.outputs.published == 'true' }}
-    name: install (${{ matrix.arch }})
+    name: install (${{ matrix.base }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.plan.outputs.arches) }}
+        include: ${{ fromJSON(needs.plan.outputs.targets) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -122,5 +128,6 @@ jobs:
         with:
           persist-credentials: false
       - env:
+          BASE: ${{ matrix.base }}
           ARCH: ${{ matrix.arch }}
-        run: ci/verify-install "$ARCH"
+        run: ci/verify-install "$BASE" "$ARCH"

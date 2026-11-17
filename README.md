@@ -8,23 +8,27 @@ A distribution adds one repository to its package manager and gets Mesa with
 the GPU driver, the patched compositor stack and the platform's small tools
 from it, updated by the system's ordinary update. It builds none of them.
 
-Packages are built **per base**, not per distribution. The base today is Arch
-Linux ARM (pacman), for `aarch64` and `armv7h`. A second base gets a recipe
-directory beside `pacman/` in each package (`apk/` for Alpine) and its own
-published repository; nothing is built for one yet.
+Packages are built **per base**, not per distribution. A package's directory
+holds one recipe per base it is built for: `arch/` for Arch Linux ARM
+(pacman: `aarch64`, `armv7h`; omarchy-a) and `alpine/` for Alpine (apk:
+`aarch64`, `armv7`; minimal-linux). Each base has its own published
+repository. Most packages are Arch-only today; orchard's kernel packages are
+built for both.
 
 ## Packages
 
 | Package | aarch64 | armv7h | What |
 |---|---|---|---|
-| `mesa` | yes | - | Mesa from [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa): OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and `gpu-probe`. Follows the fork's `main` automatically. Replaces Arch's `mesa`. |
+| `mesa` | yes | - | Mesa from [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa): OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and `gpu-probe`. Pinned to a commit of the fork's `main` until the fork tags its first release; then it follows releases. Replaces Arch's `mesa`. |
 | `wlroots0.20` | yes | yes | Arch's wlroots 0.20 with fast rotated software compositing and a GLES2 renderer that reads shared-memory buffers in place. Replaces Arch's `wlroots0.20`. |
 | `labwc` | yes | yes | Labwc with the tablet patches: touch input fixes, bottom-edge swipe, session transitions, the overview. Replaces Arch's `labwc`. |
 | `libva-v4l2-request` | yes | - | VA-API on orchard's hardware video decoders. |
-| `omactivity` | yes | yes | The touch task manager, from [OrchardLinux/omactivity](https://github.com/OrchardLinux/omactivity). Follows its `main` automatically. |
-| `folio-touch` | yes | yes | Files: Folio with touch mode, from the `touch-mode` branch of [OrchardLinux/folio](https://github.com/OrchardLinux/folio), followed automatically. Provides `folio` and conflicts with upstream Omarchy's. |
+| `omactivity` | yes | yes | The touch task manager, from [OrchardLinux/omactivity](https://github.com/OrchardLinux/omactivity). Follows its releases (the published pin is newer than v0.1.0; its next release moves it). |
+| `folio-touch` | yes | yes | Files: Folio with touch mode, from the `touch-mode` branch of [OrchardLinux/folio](https://github.com/OrchardLinux/folio), pinned to a commit until the fork tags a release newer than 0.4.0 (`v0.4.1`; its tag `a0.2.0-1` is no version tag). Provides `folio` and conflicts with upstream Omarchy's. |
 | `omafox` | yes | yes | Firefox follows the Omarchy theme. |
 | `omacalc` | - | yes | Omarchy's calculator, which upstream Omarchy publishes for 64-bit only. |
+| `linux-orchard-apple-16k`, `linux-orchard-apple-4k` | yes | - | orchard's kernel, modules, the boards' device trees, initrd and hardware defaults for A9 and later (16 KiB pages) or A7 to A8X: an orchard release's platform layer, installed unchanged by a plain PKGBUILD and APKBUILD; orchard's installer installs this package. Its pacman hooks (apk: scripts and trigger) run orchard's `boot-entries`, which keeps the system's boot entries current and the previous kernel as a fallback. The two conflict. |
+| `linux-orchard-apple-armv7` | - | yes | The same for the 32-bit boards (Alpine: `armv7`). |
 
 Packages that replace an Arch package keep Arch's name and carry epoch 1. pacman
 takes a package from the first repository that lists it, so with `[orchard]`
@@ -58,12 +62,26 @@ has the steps that remain and the entry to use afterwards.
 `gpu-probe` is at `/usr/lib/orchard/gpu-probe`; `/usr/lib/omarchy-a/gpu-probe`
 links to it for omarchy-a's login session.
 
+On Alpine (minimal-linux), unsigned for now too, so apk needs `--allow-untrusted`:
+
+```sh
+echo https://github.com/OrchardLinux/packages/releases/download >> /etc/apk/repositories
+apk update --allow-untrusted
+```
+
+apk asks for `SERVER/ARCH/APKINDEX.tar.gz`, so each architecture's apk
+repository is the release named after it (`aarch64`, `armv7`).
+
+A test tablet installed before kernel packages takes its kernel package once with
+`pacman -S --overwrite '/usr/*' linux-orchard-PLATFORM` (Alpine: `apk add --allow-untrusted linux-orchard-PLATFORM`).
+
 ## Layout
 
 ```
 packages/NAME/source.json     the pinned source: URL, checksum, commit; "track" if it follows a branch
 packages/NAME/patches/        changes to the source, for every base
-packages/NAME/pacman/         the Arch recipe (PKGBUILD)
+packages/NAME/arch/           the Arch recipe (PKGBUILD) and its files
+packages/NAME/alpine/         the Alpine recipe (APKBUILD) and its scripts
 packages/NAME/tests/          tests of the patches; the recipe's check() runs them
 ci/                           the build container and the build, publish and install-check scripts
 tools/pkgrepo                 what to build, moving pins (see --help)
@@ -82,26 +100,40 @@ So a change to a package is: edit its patches or recipe, raise `pkgrel`
 is already published is refused with that advice rather than published
 silently.
 
-**Sources that move on their own.** A package with `"track"` in its
-`source.json` follows that branch of its source repository. The workflow
-*Follow sources* looks every 20 minutes, moves the pin to the branch's newest
-commit (checksum, version and all), commits that to `main` and starts the
-build, which then builds that one package. The version contains the commit's
-number on the branch (`0.1.0.3.g3ffeac29dea`: the third commit), so a newer
-commit is always a newer package. Development stays in the source
-repository; it needs no packaging of its own. A source
-repository can also announce a push and skip the wait:
+**Releases only.** A package publishes when its source tags a release, never
+for a push to the source or a nightly. A package with `"track"` in its
+`source.json` follows the releases of its source repository (`"track"` names the
+branch its first pin was taken from). The workflow *Follow sources* looks every
+20 minutes; when the newest release has a version tag (`v1.2.3`) newer than the
+published package, it moves the pin to that tag (commit, checksum, version),
+commits that to `main` and starts the build, which then builds that one
+package. A source repository can also announce a release and skip the wait:
 
 ```sh
 gh api repos/OrchardLinux/packages/dispatches -f event_type=source-updated \
-  -F 'client_payload[repo]=OrchardLinux/mesa' -F 'client_payload[sha]=COMMIT'
+  -F 'client_payload[repo]=OrchardLinux/mesa' -F 'client_payload[tag]=v27.0.0'
 ```
 
 from a workflow there, which needs a token that may send this event; none
-exists yet. A commit is only taken if the tracked branch contains it and it
-continues the pinned one. A branch marked `"rebased"` (Folio's touch mode,
-which is rebased onto upstream) is also followed across a rebase, as long as
-its commits still count upwards.
+exists yet. Still pinned to a commit until their first release: Mesa
+(OrchardLinux/mesa has no release) and folio-touch (OrchardLinux/folio needs a
+version tag newer than 0.4.0).
+
+**orchard's kernels.** `linux-orchard-PLATFORM` has an Arch and an Alpine
+recipe that fetch an orchard release's `platform-PLATFORM.tar.gz` (pinned by
+checksum) and install it unchanged, with the pacman hooks, or the apk scripts
+and trigger, that run the layer's `/usr/lib/orchard/boot-entries`. Plain
+makepkg and abuild build them; nothing is compiled. Their version is orchard's
+(`0.4.0-1`, Alpine `0.4.0-r0`). A release of orchard is a new pkgver and
+checksum in both recipes, which one command writes from the release's assets:
+
+```sh
+tools/pkgrepo orchard-release v0.4.0
+```
+
+They are pinned to orchard 0.3.1 now, whose layer predates `boot-entries`; the
+hooks and trigger skip it where it is missing. How the packages write boot entries is orchard's
+[boot contract](https://github.com/OrchardLinux/orchard/blob/main/docs/boot-contract.md#kernel-packages).
 
 **Arch moves underneath.** Mesa runs on the LLVM it was built with, and
 pacman refuses an update that would break that. Every six hours *Follow
@@ -115,9 +147,16 @@ uploaded first and the index last; the package files of the previous index
 are kept, older ones removed. Then a fresh Arch Linux ARM container per
 architecture installs Arch's `labwc`, `wlroots0.20` and `mesa`, adds
 `[orchard]`, and has to end up with every package of the repository installed
-from it and a clean `pacman -Dk`.
+from it and a clean `pacman -Dk`. A fresh Alpine container per architecture
+does the same with the apk repository. The kernel packages, which conflict,
+go one at a time, and on those containers, which the Orchard installer did not
+set up, their hooks have to leave `/boot` and `/usr/lib/modules` alone. apk
+indexes are signed with `ORCHARD_APK_KEY` once it exists, until then with a
+key made for each publish.
 
-**Builders.** GitHub's free arm64 runners. `aarch64` builds in a pinned Arch
+**Builders.** GitHub's free arm64 runners. Alpine packages build with abuild in
+Alpine's official image (the release minimal-linux uses), `armv7` in its
+32-bit mode. `aarch64` builds in a pinned Arch
 Linux ARM image; `armv7h` in Arch Linux ARM's official ARMv7 root, run by the
 runner's 64-bit kernel in 32-bit mode, without emulation. Each build first
 updates its container fully, installs what the recipe names, and runs
@@ -126,7 +165,8 @@ updates its container fully, installs what the recipe names, and runs
 Locally, on an arm64 Linux host with Docker:
 
 ```sh
-ci/build-package labwc aarch64 1:0.20.2-1     # package in out/
+ci/build-package arch labwc aarch64 1:0.20.2-1                    # package in out/
+ci/build-package alpine linux-orchard-apple-16k aarch64 0.3.1-r0
 python3 -m unittest discover -s tests
 ```
 
