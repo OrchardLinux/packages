@@ -1,5 +1,6 @@
 # Orchard: Labwc with the tablet patches in ../patches (touch input fixes, the
-# bottom-edge swipe, session transitions, the overview), in the place of
+# bottom-edge swipe, session transitions, the overview, facts for the
+# on-screen keyboard), in the place of
 # Arch's labwc. The name is Arch's and [orchard] is listed first, so
 # `pacman -S labwc` and `pacman -Syu` take this one; the epoch puts it above
 # whatever Arch build a tablet already has.
@@ -17,7 +18,7 @@ pkgname=labwc
 _commit=97f28877a343e062f3178d201f0248cd9c2610cf
 epoch=1
 pkgver=0.20.2
-pkgrel=3
+pkgrel=4
 pkgdesc='stacking wayland compositor with look and feel from openbox, with OrchardLinux tablet patches'
 url="https://github.com/labwc/labwc"
 arch=('aarch64' 'armv7h')
@@ -32,6 +33,7 @@ depends=(
   librsvg
   libsfdo
   libwlroots-0.20.so
+  'wlroots0.20>=1:0.20.2-2'  # text-input-v3 version 2 (0007)
   libxcb
   libxkbcommon
   libxml2
@@ -61,6 +63,7 @@ _patches=(
   0004-overview.patch
   0005-title-double-tap.patch
   0006-hide-cursor-until-pointer-input.patch
+  0007-on-screen-keyboard-listener.patch
 )
 source=("labwc-${_commit}.tar.gz::https://codeload.github.com/labwc/labwc/tar.gz/${_commit}"
         "${_patches[@]}")
@@ -70,7 +73,8 @@ sha256sums=('022676dbcbf6b6206b97d7bac8a339c8a0203e3e99693107c15b5a6183e4b0ea'
             'b17d682b73b890cadde34cdede0529b361e4303c9e1d17ffc85ad7ae212884f8'
             '0af471fa5fdb9a8fbf5824a0ab4a28c44f3a2e740104e8079df0e8355b083c75'
             '0966d5b303c6230eb429154f0e24708cc3a5421cc7f02a8f81239e660456da67'
-            'a32f6ba1f6254704c42c80098fb74e648d53271a27364014f6928067722e775b')
+            'a32f6ba1f6254704c42c80098fb74e648d53271a27364014f6928067722e775b'
+            'c767678e286a44bc35c18536f2ed7e9fe4d7d0c812dfe024aa30c0d524112283')
 
 prepare() {
   local patch

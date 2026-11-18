@@ -1,0 +1,120 @@
+From a9745484bec7cdc1c3a812852c2974ced4a0ae79 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Wed, 18 Nov 2026 23:12:24 +0800
+Subject: [PATCH] text-input-v3: support version 2: show and hide the input
+ panel
+
+Version 2 of text-input-unstable-v3 lets a client ask for an input panel
+(an on-screen keyboard) to be shown or hidden. Qt sends show_input_panel
+when a field is tapped, also one that already has focus, which is the one
+signal a compositor has to bring a dismissed keyboard back.
+
+Advertise version 2, emit show_input_panel and hide_input_panel signals,
+and accept set_available_actions, whose actions no input method here
+offers.
+
+Assisted-by: LLM
+---
+ include/wlr/types/wlr_text_input_v3.h |  4 +++
+ types/wlr_text_input_v3.c             | 35 ++++++++++++++++++++++++++-
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/include/wlr/types/wlr_text_input_v3.h b/include/wlr/types/wlr_text_input_v3.h
+index 29feb7e..ba78fca 100644
+--- a/include/wlr/types/wlr_text_input_v3.h
++++ b/include/wlr/types/wlr_text_input_v3.h
+@@ -61,6 +61,10 @@ struct wlr_text_input_v3 {
+ 		struct wl_signal commit;
+ 		struct wl_signal disable;
+ 		struct wl_signal destroy;
++		// The client asks for an input panel (an on-screen keyboard) to be
++		// shown or hidden, since version 2. Hints, not double-buffered state.
++		struct wl_signal show_input_panel;
++		struct wl_signal hide_input_panel;
+ 	} events;
+ 
+ 	struct {
+diff --git a/types/wlr_text_input_v3.c b/types/wlr_text_input_v3.c
+index bbae3a0..a80cdcb 100644
+--- a/types/wlr_text_input_v3.c
++++ b/types/wlr_text_input_v3.c
+@@ -12,6 +12,8 @@ static void text_input_clear_focused_surface(struct wlr_text_input_v3 *text_inpu
+ 	text_input->focused_surface = NULL;
+ }
+ 
++#define TEXT_INPUT_MANAGER_V3_VERSION 2
++
+ static const struct zwp_text_input_v3_interface text_input_impl;
+ 
+ static struct wlr_text_input_v3 *text_input_from_resource(
+@@ -70,6 +72,8 @@ static void wlr_text_input_destroy(struct wlr_text_input_v3 *text_input) {
+ 	assert(wl_list_empty(&text_input->events.commit.listener_list));
+ 	assert(wl_list_empty(&text_input->events.disable.listener_list));
+ 	assert(wl_list_empty(&text_input->events.destroy.listener_list));
++	assert(wl_list_empty(&text_input->events.show_input_panel.listener_list));
++	assert(wl_list_empty(&text_input->events.hide_input_panel.listener_list));
+ 
+ 	text_input_clear_focused_surface(text_input);
+ 	wl_list_remove(&text_input->seat_destroy.link);
+@@ -201,6 +205,30 @@ static void text_input_commit(struct wl_client *client,
+ 	}
+ }
+ 
++static void text_input_set_available_actions(struct wl_client *client,
++		struct wl_resource *resource, struct wl_array *actions) {
++	// The actions an input method may offer (version 2); nothing here
++	// offers any, so they are not kept.
++}
++
++static void text_input_show_input_panel(struct wl_client *client,
++		struct wl_resource *resource) {
++	struct wlr_text_input_v3 *text_input = text_input_from_resource(resource);
++	if (!text_input) {
++		return;
++	}
++	wl_signal_emit_mutable(&text_input->events.show_input_panel, NULL);
++}
++
++static void text_input_hide_input_panel(struct wl_client *client,
++		struct wl_resource *resource) {
++	struct wlr_text_input_v3 *text_input = text_input_from_resource(resource);
++	if (!text_input) {
++		return;
++	}
++	wl_signal_emit_mutable(&text_input->events.hide_input_panel, NULL);
++}
++
+ static const struct zwp_text_input_v3_interface text_input_impl = {
+ 	.destroy = text_input_destroy,
+ 	.enable = text_input_enable,
+@@ -210,6 +238,9 @@ static const struct zwp_text_input_v3_interface text_input_impl = {
+ 	.set_content_type = text_input_set_content_type,
+ 	.set_cursor_rectangle = text_input_set_cursor_rectangle,
+ 	.commit = text_input_commit,
++	.set_available_actions = text_input_set_available_actions,
++	.show_input_panel = text_input_show_input_panel,
++	.hide_input_panel = text_input_hide_input_panel,
+ };
+ 
+ static const struct zwp_text_input_manager_v3_interface text_input_manager_impl;
+@@ -269,6 +300,8 @@ static void text_input_manager_get_text_input(struct wl_client *client,
+ 	wl_signal_init(&text_input->events.commit);
+ 	wl_signal_init(&text_input->events.disable);
+ 	wl_signal_init(&text_input->events.destroy);
++	wl_signal_init(&text_input->events.show_input_panel);
++	wl_signal_init(&text_input->events.hide_input_panel);
+ 
+ 	text_input->resource = text_input_resource;
+ 	wl_resource_set_user_data(text_input_resource, text_input);
+@@ -336,7 +369,7 @@ struct wlr_text_input_manager_v3 *wlr_text_input_manager_v3_create(
+ 	wl_signal_init(&manager->events.destroy);
+ 
+ 	manager->global = wl_global_create(display,
+-		&zwp_text_input_manager_v3_interface, 1, manager,
++		&zwp_text_input_manager_v3_interface, TEXT_INPUT_MANAGER_V3_VERSION, manager,
+ 		text_input_manager_bind);
+ 	if (!manager->global) {
+ 		free(manager);
+-- 
+2.54.0 (Apple Git-157)
+

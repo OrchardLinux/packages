@@ -1,0 +1,548 @@
+From 54b1a2693ef263b95c9507d23627bea837819d31 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Wed, 18 Nov 2026 23:12:31 +0800
+Subject: [PATCH] Report text input facts to an on-screen keyboard listener
+
+An on-screen keyboard has to open when the person taps a text field,
+not whenever a program moves focus or a press becomes a text selection,
+and to step aside while someone types on a physical keyboard. Only the
+compositor sees the facts that decide this; the decision itself is
+policy, so it belongs to one program the desktop provides rather than
+to the compositor.
+
+Add <onScreenKeyboard listener="command" />. Labwc starts the listener
+once and writes one line per fact to its standard input: a focused
+text field going on (with the client's text-input version) or off, the
+client asking for an input panel to be shown or hidden, a press on the
+keyboard-focused surface and its release (how long it lasted and how
+far it moved), a key of the typing block pressed on a physical
+keyboard, and how many physical keyboards with letter keys there are.
+The pipe does not block; a listener that stops reading loses lines, the
+compositor never waits.
+
+With a listener set, text-inputs get keyboard focus even when no input
+method is bound, so that clients report their fields at all.
+
+Assisted-by: LLM
+---
+ include/config/rcxml.h |   3 +
+ include/input/ime.h    |   2 +
+ include/input/osk.h    |  45 ++++++++++
+ src/config/rcxml.c     |   3 +
+ src/input/cursor.c     |   5 ++
+ src/input/ime.c        |  36 +++++++-
+ src/input/keyboard.c   |   4 +
+ src/input/meson.build  |   1 +
+ src/input/osk.c        | 183 +++++++++++++++++++++++++++++++++++++++++
+ src/input/touch.c      |   3 +
+ src/seat.c             |   5 ++
+ 11 files changed, 289 insertions(+), 1 deletion(-)
+ create mode 100644 include/input/osk.h
+ create mode 100644 src/input/osk.c
+
+diff --git a/include/config/rcxml.h b/include/config/rcxml.h
+index 008ff53..aac21b7 100644
+--- a/include/config/rcxml.h
++++ b/include/config/rcxml.h
+@@ -96,6 +96,9 @@ struct rcxml {
+ 	bool overview_swipe;             /* four fingers up and down */
+ 	char *overview_open_command;
+ 	char *overview_close_command;
++
++	/* <onScreenKeyboard listener="" />: see input/osk.h */
++	char *osk_listener;
+ 	char *prompt_command;
+ 	char *error_command;
+ 
+diff --git a/include/input/ime.h b/include/input/ime.h
+index 046e092..0633352 100644
+--- a/include/input/ime.h
++++ b/include/input/ime.h
+@@ -63,6 +63,8 @@ struct text_input {
+ 	struct wl_listener commit;
+ 	struct wl_listener disable;
+ 	struct wl_listener destroy;
++	struct wl_listener show_input_panel;
++	struct wl_listener hide_input_panel;
+ };
+ 
+ /*
+diff --git a/include/input/osk.h b/include/input/osk.h
+new file mode 100644
+index 0000000..51d3410
+--- /dev/null
++++ b/include/input/osk.h
+@@ -0,0 +1,45 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef LABWC_OSK_H
++#define LABWC_OSK_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct seat;
++struct text_input;
++struct wlr_surface;
++
++/*
++ * Facts for an on-screen keyboard, reported to one listener program
++ * (<onScreenKeyboard listener="command" />). Labwc starts the listener
++ * once and writes one line per fact to its standard input; it decides
++ * what the keyboard does. Labwc keeps no keyboard policy of its own.
++ *
++ *   field on VERSION   the focused client enabled a text-input
++ *                      (VERSION: the client's text-input-v3 version)
++ *   field off          no focused text-input is enabled any more
++ *   show, hide         the focused client asks for an input panel to be
++ *                      shown or hidden (text-input-v3 version 2)
++ *   press              a pointer button or touch went down on the
++ *                      keyboard-focused surface
++ *   release MS PX      that press ended, MS milliseconds after it began
++ *                      and PX layout pixels from where it began
++ *   key                a key of the typing block was pressed on a physical
++ *                      keyboard (not a virtual one, not a button such as
++ *                      volume or power)
++ *   keyboards N        N physical keyboards with letter keys are present
++ *
++ * With a listener set, clients learn of keyboard focus through text-input
++ * even when no input-method is bound, so that they report their fields.
++ */
++bool osk_reporting(void);
++
++void osk_report_field(struct seat *seat);
++void osk_report_panel(struct text_input *text_input, bool show);
++void osk_report_press(struct seat *seat, struct wlr_surface *surface,
++	double lx, double ly, uint32_t time_msec);
++void osk_report_release(double lx, double ly, uint32_t time_msec);
++void osk_report_key(uint32_t keycode, bool is_virtual);
++void osk_report_keyboards(struct seat *seat);
++
++#endif /* LABWC_OSK_H */
+diff --git a/src/config/rcxml.c b/src/config/rcxml.c
+index 8a01e0c..573652e 100644
+--- a/src/config/rcxml.c
++++ b/src/config/rcxml.c
+@@ -1180,6 +1180,8 @@ entry(xmlNode *node, char *nodename, char *content)
+ 		xstrdup_replace(rc.overview_open_command, content);
+ 	} else if (!strcasecmp(nodename, "closeCommand.overview")) {
+ 		xstrdup_replace(rc.overview_close_command, content);
++	} else if (!strcasecmp(nodename, "listener.onScreenKeyboard")) {
++		xstrdup_replace(rc.osk_listener, content);
+ 	} else if (!strcasecmp(nodename, "startupFade.core")) {
+ 		set_bool(content, &rc.startup_fade);
+ 	} else if (!strcasecmp(nodename, "startupSignal.core")) {
+@@ -2091,6 +2093,7 @@ rcxml_finish(void)
+ 	zfree(rc.handover_dir);
+ 	zfree(rc.overview_open_command);
+ 	zfree(rc.overview_close_command);
++	zfree(rc.osk_listener);
+ 	zfree(rc.error_command);
+ 	zfree(rc.theme_name);
+ 	zfree(rc.icon_theme_name);
+diff --git a/src/input/cursor.c b/src/input/cursor.c
+index db96430..f998ef9 100644
+--- a/src/input/cursor.c
++++ b/src/input/cursor.c
+@@ -26,6 +26,7 @@
+ #include "idle.h"
+ #include "input/gestures.h"
+ #include "input/keyboard.h"
++#include "input/osk.h"
+ #include "input/tablet.h"
+ #include "input/touch.h"
+ #include "labwc.h"
+@@ -1319,12 +1320,16 @@ handle_button(struct wl_listener *listener, void *data)
+ 	case WL_POINTER_BUTTON_STATE_PRESSED:
+ 		notify = cursor_process_button_press(seat, event->button,
+ 			event->time_msec);
++		/* After the press focused what it landed on. */
++		osk_report_press(seat, seat->wlr_seat->pointer_state.focused_surface,
++			seat->cursor->x, seat->cursor->y, event->time_msec);
+ 		if (notify) {
+ 			wlr_seat_pointer_notify_button(seat->wlr_seat, event->time_msec,
+ 				event->button, event->state);
+ 		}
+ 		break;
+ 	case WL_POINTER_BUTTON_STATE_RELEASED:
++		osk_report_release(seat->cursor->x, seat->cursor->y, event->time_msec);
+ 		notify = cursor_process_button_release(seat, event->button,
+ 			event->time_msec);
+ 		if (notify) {
+diff --git a/src/input/ime.c b/src/input/ime.c
+index 1758d1c..afa5bc0 100644
+--- a/src/input/ime.c
++++ b/src/input/ime.c
+@@ -14,6 +14,7 @@
+ #include "common/mem.h"
+ #include "common/scene-helpers.h"
+ #include "input/keyboard.h"
++#include "input/osk.h"
+ #include "labwc.h"
+ #include "node.h"
+ #include "output.h"
+@@ -156,7 +157,10 @@ update_text_inputs_focused_surface(struct input_method_relay *relay)
+ 		struct wlr_text_input_v3 *input = text_input->input;
+ 
+ 		struct wlr_surface *new_focused_surface;
+-		if (relay->input_method && relay->focused_surface
++		/* An on-screen keyboard needs the fields reported even when
++		 * no input-method is bound. */
++		if ((relay->input_method || osk_reporting())
++				&& relay->focused_surface
+ 				&& SAME_CLIENT(input, relay->focused_surface)) {
+ 			new_focused_surface = relay->focused_surface;
+ 		} else {
+@@ -489,6 +493,7 @@ handle_text_input_enable(struct wl_listener *listener, void *data)
+ 		update_popups_position(relay);
+ 		send_state_to_input_method(relay);
+ 	}
++	osk_report_field(relay->seat);
+ }
+ 
+ static void
+@@ -502,6 +507,7 @@ handle_text_input_disable(struct wl_listener *listener, void *data)
+ 	 * doesn't deactivate the input-method.
+ 	 */
+ 	update_active_text_input(text_input->relay);
++	osk_report_field(text_input->relay->seat);
+ }
+ 
+ static void
+@@ -517,6 +523,22 @@ handle_text_input_commit(struct wl_listener *listener, void *data)
+ 	}
+ }
+ 
++static void
++handle_text_input_show_input_panel(struct wl_listener *listener, void *data)
++{
++	struct text_input *text_input =
++		wl_container_of(listener, text_input, show_input_panel);
++	osk_report_panel(text_input, true);
++}
++
++static void
++handle_text_input_hide_input_panel(struct wl_listener *listener, void *data)
++{
++	struct text_input *text_input =
++		wl_container_of(listener, text_input, hide_input_panel);
++	osk_report_panel(text_input, false);
++}
++
+ static void
+ handle_text_input_destroy(struct wl_listener *listener, void *data)
+ {
+@@ -526,8 +548,11 @@ handle_text_input_destroy(struct wl_listener *listener, void *data)
+ 	wl_list_remove(&text_input->disable.link);
+ 	wl_list_remove(&text_input->commit.link);
+ 	wl_list_remove(&text_input->destroy.link);
++	wl_list_remove(&text_input->show_input_panel.link);
++	wl_list_remove(&text_input->hide_input_panel.link);
+ 	wl_list_remove(&text_input->link);
+ 	update_active_text_input(text_input->relay);
++	osk_report_field(text_input->relay->seat);
+ 	free(text_input);
+ }
+ 
+@@ -558,6 +583,14 @@ handle_new_text_input(struct wl_listener *listener, void *data)
+ 	text_input->destroy.notify = handle_text_input_destroy;
+ 	wl_signal_add(&text_input->input->events.destroy, &text_input->destroy);
+ 
++	text_input->show_input_panel.notify = handle_text_input_show_input_panel;
++	wl_signal_add(&text_input->input->events.show_input_panel,
++		&text_input->show_input_panel);
++
++	text_input->hide_input_panel.notify = handle_text_input_hide_input_panel;
++	wl_signal_add(&text_input->input->events.hide_input_panel,
++		&text_input->hide_input_panel);
++
+ 	update_text_inputs_focused_surface(relay);
+ }
+ 
+@@ -626,4 +659,5 @@ input_method_relay_set_focus(struct input_method_relay *relay,
+ 
+ 	update_text_inputs_focused_surface(relay);
+ 	update_active_text_input(relay);
++	osk_report_field(relay->seat);
+ }
+diff --git a/src/input/keyboard.c b/src/input/keyboard.c
+index b5403cd..74d3853 100644
+--- a/src/input/keyboard.c
++++ b/src/input/keyboard.c
+@@ -16,6 +16,7 @@
+ #include "idle.h"
+ #include "input/ime.h"
+ #include "input/key-state.h"
++#include "input/osk.h"
+ #include "labwc.h"
+ #include "menu/menu.h"
+ #include "overview.h"
+@@ -663,6 +664,9 @@ handle_key(struct wl_listener *listener, void *data)
+ 	key_state_indicator_update(seat);
+ 
+ 	idle_manager_notify_activity(seat->wlr_seat);
++	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
++		osk_report_key(event->keycode, keyboard->is_virtual);
++	}
+ 
+ 	/* any new press/release cancels current keybind repeat */
+ 	keyboard_cancel_keybind_repeat(keyboard);
+diff --git a/src/input/meson.build b/src/input/meson.build
+index 4d56f00..8b09783 100644
+--- a/src/input/meson.build
++++ b/src/input/meson.build
+@@ -8,4 +8,5 @@ labwc_sources += files(
+   'key-state.c',
+   'touch.c',
+   'ime.c',
++  'osk.c',
+ )
+diff --git a/src/input/osk.c b/src/input/osk.c
+new file mode 100644
+index 0000000..93f54b2
+--- /dev/null
++++ b/src/input/osk.c
+@@ -0,0 +1,183 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "input/osk.h"
++#include <errno.h>
++#include <fcntl.h>
++#include <linux/input-event-codes.h>
++#include <math.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++#include <wlr/config.h>
++#if WLR_HAS_LIBINPUT_BACKEND
++#include <wlr/backend/libinput.h>
++#endif
++#include <wlr/types/wlr_seat.h>
++#include <wlr/types/wlr_text_input_v3.h>
++#include <wlr/util/log.h>
++#include "common/spawn.h"
++#include "config/rcxml.h"
++#include "input/ime.h"
++#include "input/input.h"
++#include "input/keyboard.h"
++#include "labwc.h"
++
++static int listener_fd = -1;
++static uint32_t field_version; /* reported: 0 off, else the version */
++
++/* The reported press, until its release. */
++static struct {
++	bool down;
++	double lx, ly;
++	uint32_t time_msec;
++} press;
++
++bool
++osk_reporting(void)
++{
++	return rc.osk_listener && *rc.osk_listener;
++}
++
++/*
++ * One line to the listener, started on first use and again after it went
++ * away. The pipe does not block: a listener that stops reading loses
++ * lines, the compositor never waits for it.
++ */
++static void
++report(const char *format, ...)
++{
++	if (!osk_reporting()) {
++		return;
++	}
++	char line[64];
++	va_list args;
++	va_start(args, format);
++	int length = vsnprintf(line, sizeof(line) - 1, format, args);
++	va_end(args);
++	if (length < 0 || length >= (int)sizeof(line) - 1) {
++		return;
++	}
++	line[length++] = '\n';
++
++	for (int attempt = 0; attempt < 2; attempt++) {
++		if (listener_fd < 0) {
++			if (spawn_piped_async_no_shell(rc.osk_listener, &listener_fd) <= 0) {
++				listener_fd = -1;
++				return;
++			}
++			fcntl(listener_fd, F_SETFL, fcntl(listener_fd, F_GETFL) | O_NONBLOCK);
++			fcntl(listener_fd, F_SETFD, FD_CLOEXEC);
++		}
++		if (write(listener_fd, line, length) == length) {
++			return;
++		}
++		if (errno == EAGAIN) {
++			wlr_log(WLR_ERROR, "on-screen keyboard listener is not reading");
++			return;
++		}
++		close(listener_fd);
++		listener_fd = -1;
++	}
++}
++
++static struct text_input *
++focused_enabled_text_input(struct input_method_relay *relay)
++{
++	struct text_input *text_input;
++	wl_list_for_each(text_input, &relay->text_inputs, link) {
++		if (text_input->input->focused_surface
++				&& text_input->input->current_enabled) {
++			return text_input;
++		}
++	}
++	return NULL;
++}
++
++void
++osk_report_field(struct seat *seat)
++{
++	struct text_input *text_input =
++		focused_enabled_text_input(seat->input_method_relay);
++	uint32_t version = text_input
++		? (uint32_t)wl_resource_get_version(text_input->input->resource) : 0;
++	if (version == field_version) {
++		return;
++	}
++	field_version = version;
++	if (version) {
++		report("field on %u", version);
++	} else {
++		report("field off");
++	}
++}
++
++void
++osk_report_panel(struct text_input *text_input, bool show)
++{
++	if (text_input->input->focused_surface) {
++		report(show ? "show" : "hide");
++	}
++}
++
++void
++osk_report_press(struct seat *seat, struct wlr_surface *surface,
++		double lx, double ly, uint32_t time_msec)
++{
++	if (!surface || surface != seat->input_method_relay->focused_surface) {
++		return;
++	}
++	press.down = true;
++	press.lx = lx;
++	press.ly = ly;
++	press.time_msec = time_msec;
++	report("press");
++}
++
++void
++osk_report_release(double lx, double ly, uint32_t time_msec)
++{
++	if (!press.down) {
++		return;
++	}
++	press.down = false;
++	report("release %u %.0f", time_msec - press.time_msec,
++		hypot(lx - press.lx, ly - press.ly));
++}
++
++void
++osk_report_key(uint32_t keycode, bool is_virtual)
++{
++	/* Escape to F12: letters, digits, punctuation, modifiers, keypad. */
++	if (!is_virtual && keycode >= KEY_ESC && keycode <= KEY_F12) {
++		report("key");
++	}
++}
++
++/* A keyboard to type on: the device has letter keys (not gpio-keys). */
++static bool
++is_typing_keyboard(struct input *input)
++{
++	if (input->wlr_input_device->type != WLR_INPUT_DEVICE_KEYBOARD
++			|| ((struct keyboard *)input)->is_virtual) {
++		return false;
++	}
++#if WLR_HAS_LIBINPUT_BACKEND
++	if (wlr_input_device_is_libinput(input->wlr_input_device)) {
++		struct libinput_device *device =
++			wlr_libinput_get_device_handle(input->wlr_input_device);
++		return libinput_device_keyboard_has_key(device, KEY_A) > 0;
++	}
++#endif
++	return false;
++}
++
++void
++osk_report_keyboards(struct seat *seat)
++{
++	int count = 0;
++	struct input *input;
++	wl_list_for_each(input, &seat->inputs, link) {
++		count += is_typing_keyboard(input);
++	}
++	report("keyboards %d", count);
++}
+diff --git a/src/input/touch.c b/src/input/touch.c
+index 16c97dd..26e2d42 100644
+--- a/src/input/touch.c
++++ b/src/input/touch.c
+@@ -21,6 +21,7 @@
+ #include "idle.h"
+ #include "input/keyboard.h"
+ #include "input/bottom-swipe.h"
++#include "input/osk.h"
+ #include "labwc.h"
+ #include "layers.h"
+ #include "node.h"
+@@ -477,6 +478,7 @@ handle_touch_down(struct wl_listener *listener, void *data)
+ 			wlr_cursor_warp_absolute(seat->cursor, &event->touch->base,
+ 				event->x, event->y);
+ 		}
++		osk_report_press(seat, touch_point->surface, lx, ly, event->time_msec);
+ 		wlr_seat_touch_notify_down(seat->wlr_seat, touch_point->surface,
+ 			event->time_msec, event->touch_id, lx - x_offset, ly - y_offset);
+ 	} else if (touch_point->swipe.pending) {
+@@ -512,6 +514,7 @@ handle_touch_up(struct wl_listener *listener, void *data)
+ 			cancel_touch_client(seat, touch_point);
+ 		}
+ 		if (!touch_point->consumed && touch_point->surface) {
++			osk_report_release(touch_point->lx, touch_point->ly, event->time_msec);
+ 			wlr_seat_touch_notify_up(seat->wlr_seat, event->time_msec, event->touch_id);
+ 		} else if (!touch_point->consumed) {
+ 			/* An edge tap that never crossed the threshold is still a tap. */
+diff --git a/src/seat.c b/src/seat.c
+index 488bf3b..dc5082f 100644
+--- a/src/seat.c
++++ b/src/seat.c
+@@ -21,6 +21,7 @@
+ #include "config/rcxml.h"
+ #include "config/touch.h"
+ #include "input/ime.h"
++#include "input/osk.h"
+ #include "input/tablet.h"
+ #include "input/tablet-pad.h"
+ #include "input/input.h"
+@@ -71,6 +72,7 @@ input_device_destroy(struct wl_listener *listener, void *data)
+ 		wl_list_remove(&keyboard->key.link);
+ 		wl_list_remove(&keyboard->modifiers.link);
+ 		keyboard_cancel_keybind_repeat(keyboard);
++		osk_report_keyboards(input->seat);
+ 	}
+ 	free(input);
+ }
+@@ -567,6 +569,9 @@ seat_add_device(struct seat *seat, struct input *input)
+ 	wl_list_insert(&seat->inputs, &input->link);
+ 
+ 	seat_update_capabilities(seat);
++	if (input->wlr_input_device->type == WLR_INPUT_DEVICE_KEYBOARD) {
++		osk_report_keyboards(seat);
++	}
+ }
+ 
+ static void
+-- 
+2.54.0 (Apple Git-157)
+
