@@ -303,13 +303,13 @@ class Releases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             packages = Path(directory)
             shutil.copytree(ROOT / 'packages/omactivity', packages / 'omactivity')
-            with mock.patch.object(pkgrepo, 'PACKAGES', packages), self.answers(['v0.1.1']), \
+            with mock.patch.object(pkgrepo, 'PACKAGES', packages), self.answers(['v9.9.9']), \
                     mock.patch.object(pkgrepo, 'fetch', return_value=b'archive'), mock.patch('sys.stdout', io.StringIO()):
                 self.assertTrue(pkgrepo.bump_one('omactivity'))
                 pkgrepo.check()
                 pin = pkgrepo.pin('omactivity')
-                self.assertEqual((pin['tag'], pin['track'], pin['commit']), ('v0.1.1', 'releases', 'c' * 40))
-                self.assertEqual(pkgrepo.recipe('omactivity')['version'], '0.1.1-1')
+                self.assertEqual((pin['tag'], pin['track'], pin['commit']), ('v9.9.9', 'releases', 'c' * 40))
+                self.assertEqual(pkgrepo.recipe('omactivity')['version'], '9.9.9-1')
 
 
 class Publish(unittest.TestCase):
