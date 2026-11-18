@@ -18,7 +18,7 @@
 
 pkgname=omarchy-a
 pkgver=0.3.1
-pkgrel=1
+pkgrel=2
 pkgdesc='Omarchy A: the touch desktop for Apple A-chip devices, its configuration and system defaults'
 arch=('aarch64' 'armv7h')
 url='https://github.com/OrchardLinux/omarchy-a'
@@ -37,6 +37,8 @@ depends=(
   diffutils
   libvips
   ffmpegthumbnailer
+  # The shell's input-device and plugin-folder watches (inotifywait).
+  inotify-tools
   foot
   ttf-dejavu
   ttf-jetbrains-mono-nerd
