@@ -1,0 +1,181 @@
+# Orchard: Arch Linux ARM's qt6-base 6.12.0-5 with one upstream Qt fix, in
+# the place of Arch's qt6-base. Wayland's text input followed the focused
+# window, not the focused item: once a text field had focus, moving focus to a
+# button or list in the same window kept the text input enabled, so the
+# compositor kept the on-screen keyboard open in every Qt app. Qt 6.12's
+# branch fixed this after 6.12.0 (../patches: e26d5a8eee, QTBUG-146211, and
+# b4dd527686, QTBUG-151163, which repairs a use-after-free the first one
+# introduced; both as picked to the 6.12 branch).
+#
+# Drop this package once Arch ships a Qt with these commits (6.12.1 has them
+# if it is tagged from the 6.12 branch as it stands): Arch's Qt modules move
+# with Arch's qt6-base, and the [orchard] repository, listed first, would hold
+# tablets on this 6.12.0. Until then, a new Arch qt6-base pkgrel needs ours
+# moved above it.
+#
+# No epoch, unlike the other packages that replace Arch's: pkgrel 5.1 ranks
+# above Arch's 6.12.0-5, and once this package is dropped Arch's next build
+# ranks above ours again, so tablets go back to Arch's by the ordinary update.
+# An epoch would hold them on this build for good, and would not satisfy
+# Arch's qt6-xcb-private-headers (depends qt6-base=6.12.0), which is why this
+# recipe builds qt6-base only: the headers are unchanged, Arch's package of
+# them installs beside this one.
+#
+# Otherwise Arch Linux ARM's recipe (extra/qt6-base, archlinuxarm/PKGBUILDs
+# 1117e0aaa6), unchanged: its patches in this directory, its cherry-picks,
+# dependencies and configuration; pkgver is written out, as tools/pkgrepo
+# reads it without a shell.
+
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable ibase for now, FTBFS
+#  - removed -DFEATURE_no_direct_extern_access=ON
+#  - switch source to github
+
+# ALARM: John <therealgraysky AT proton DOT me>
+#  - add libQt6Core.so.6 as a provides to allow users to select either this
+#    package or qt6-base-headless
+
+pkgname=qt6-base
+_pkgver=6.12.0
+pkgver=6.12.0
+pkgrel=5.1
+arch=(aarch64 armv7h)
+url='https://www.qt.io'
+license=(GPL-3.0-only
+         LGPL-3.0-only
+         LicenseRef-Qt-Commercial
+         Qt-GPL-exception-1.0)
+pkgdesc='A cross-platform application and UI framework'
+depends=(brotli
+         dbus
+         double-conversion
+         fontconfig
+         freetype2
+         glib2
+         glibc
+         harfbuzz
+         icu
+         krb5
+         libb2
+         libcups
+         libdrm
+         libgcc
+         libgl
+         libice
+         libinput
+         libjpeg-turbo
+         libpng
+         libproxy
+         libsm
+         libstdc++
+         liburing
+         libx11
+         libxcb
+         libxkbcommon
+         libxkbcommon-x11
+         md4c
+         mesa
+         mtdev
+         openssl
+         pcre2
+         shared-mime-info
+         sqlite
+         systemd-libs
+         tslib
+         wayland
+         xcb-util-cursor
+         xcb-util-image
+         xcb-util-keysyms
+         xcb-util-renderutil
+         xcb-util-wm
+         xdg-utils
+         zlib
+         zstd)
+makedepends=(alsa-lib
+             cmake
+             cups
+             freetds
+             git
+             gst-plugins-base-libs
+             gtk3
+             jemalloc
+             libfbclient
+             libpulse
+             mariadb-libs
+             ninja
+             postgresql
+             renderdoc
+             unixodbc
+             vulkan-headers
+             xmlstarlet)
+optdepends=('freetds: MS SQL driver'
+            'gdk-pixbuf2: GTK platform plugin'
+            'gtk3: GTK platform plugin'
+            'libfbclient: Firebird/iBase driver'
+            'mariadb-libs: MariaDB driver'
+            'pango: GTK platform plugin'
+            'perl: for syncqt'
+            'postgresql-libs: PostgreSQL driver'
+            'unixodbc: ODBC driver')
+groups=(qt6)
+_pkgfn=${pkgname/6-/}
+source=(git+https://github.com/qt/$_pkgfn#tag=v$_pkgver
+        qt6-base-cflags.patch
+        qt6-base-nostrip.patch
+        0001-qpa-wayland-enable-disable-text-input-based-on-focusObject.patch
+        0002-wayland-Avoid-TextInput-using-a-dangling-raw-pointer.patch)
+sha256sums=('d97ef157dc50bdf0425337e9adede8135ab508a4ab2f1abae7e9cfc42c5f86db'
+            '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
+            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094'
+            '4e2031bda9f17937008bc1a29a94eb45402133fd076c15f66deadea17555e439'
+            '42c0b14c990cddcfc159a23c5468ccb50cce6300831bd186175396be526617eb')
+
+prepare() {
+  patch -d $_pkgfn -p1 < qt6-base-cflags.patch # Use system CFLAGS
+  patch -d $_pkgfn -p1 < qt6-base-nostrip.patch # Don't strip binaries with qmake
+
+  git -C $_pkgfn cherry-pick -n e320c929207aaea0d4c8fb2cd29b16de6cbd2b2c # Fix QtWebEngine detection in cmake
+  git -C $_pkgfn cherry-pick -n 032643f99e090e0304ef935c2ee11c109d55c8a1 # Fix build with md4c 0.6
+  git -C $_pkgfn cherry-pick -n 6b7ee05def510c333fbb8944ae669b72a48367f3 # Fix tab scrolling with mouse wheel
+  git -C $_pkgfn cherry-pick -n a64dfe20a4b447b33c0d482cbd926528e54d53d0 # Fix hangs with openssl 4.1
+
+  # Orchard: text input follows the focused item (QTBUG-146211, QTBUG-151163)
+  patch -d $_pkgfn -p1 < 0001-qpa-wayland-enable-disable-text-input-based-on-focusObject.patch
+  patch -d $_pkgfn -p1 < 0002-wayland-Avoid-TextInput-using-a-dangling-raw-pointer.patch
+}
+
+build() {
+  cmake -B build -S $_pkgfn -G Ninja \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DINSTALL_BINDIR=lib/qt6/bin \
+    -DINSTALL_PUBLICBINDIR=bin \
+    -DINSTALL_LIBEXECDIR=lib/qt6 \
+    -DINSTALL_DOCDIR=share/doc/qt6 \
+    -DINSTALL_ARCHDATADIR=lib/qt6 \
+    -DINSTALL_DATADIR=share/qt6 \
+    -DINSTALL_INCLUDEDIR=include/qt6 \
+    -DINSTALL_MKSPECSDIR=lib/qt6/mkspecs \
+    -DINSTALL_EXAMPLESDIR=share/doc/qt6/examples \
+    -DFEATURE_journald=ON \
+    -DFEATURE_libproxy=ON \
+    -DFEATURE_openssl_linked=ON \
+    -DFEATURE_system_sqlite=ON \
+    -DFEATURE_system_xcb_xinput=ON \
+    -DFEATURE_mimetype_database=OFF \
+    -DQT_FEATURE_sql_ibase=OFF \
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS
+  cmake --build build
+}
+
+package() {
+  depends+=(qt6-translations)
+  provides=(libQt6Core.so.6)
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 $_pkgfn/LICENSES/* -t "$pkgdir"/usr/share/licenses/$pkgname
+}
