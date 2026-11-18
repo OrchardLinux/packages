@@ -1,11 +1,11 @@
 {
   "repository": "OrchardLinux/omactivity",
-  "track": "main",
   "version_file": "omactivity.pro",
   "version_pattern": "^VERSION = (.+)$",
-  "version": "0.1.0",
-  "commit": "3ffeac29deacd1f5fc9c813cf3efa9b4c6acc097",
-  "revision": 3,
-  "url": "https://github.com/OrchardLinux/omactivity/archive/3ffeac29deacd1f5fc9c813cf3efa9b4c6acc097.tar.gz",
-  "sha256": "aeb495cd9baefd32502e8ad25abac4fb82049d009fab21c72f68d8d7c7abd8dd"
+  "version": "0.1.1",
+  "commit": "abf09012089eb7f8e78740aa7f706efbb97732af",
+  "url": "https://github.com/OrchardLinux/omactivity/archive/abf09012089eb7f8e78740aa7f706efbb97732af.tar.gz",
+  "sha256": "3a457e7d1ed5e0b6b5305324f4119f0df6bbda67acd80a3de813c26f7d584bb5",
+  "track": "releases",
+  "tag": "v0.1.1"
 }

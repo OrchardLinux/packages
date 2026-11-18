@@ -5,8 +5,8 @@
 # ../source.json).
 
 pkgname=omactivity
-_commit=3ffeac29deacd1f5fc9c813cf3efa9b4c6acc097
-pkgver=0.1.0.3.g3ffeac29dea
+_commit=abf09012089eb7f8e78740aa7f706efbb97732af
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Touch-first task manager for Omarchy"
 arch=('aarch64' 'armv7h')
@@ -17,7 +17,7 @@ checkdepends=('ttf-dejavu')
 optdepends=('sudo: quit and reprioritize processes of root and other users')
 backup=('etc/omactivity/protected.conf')
 source=("omactivity-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz")
-sha256sums=('aeb495cd9baefd32502e8ad25abac4fb82049d009fab21c72f68d8d7c7abd8dd')
+sha256sums=('3a457e7d1ed5e0b6b5305324f4119f0df6bbda67acd80a3de813c26f7d584bb5')
 
 build() {
     mkdir -p build
