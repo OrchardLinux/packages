@@ -38,6 +38,14 @@ class Recipes(unittest.TestCase):
         for name in ('mesa', 'labwc', 'wlroots0.20'):
             self.assertTrue(pkgrepo.recipe(name)['version'].startswith('1:'), name)
 
+    def test_qt6_base_ranks_just_above_arch_without_an_epoch(self):
+        # It is dropped once Arch's Qt has the fix; an epoch would hold tablets on it after that.
+        version = pkgrepo.recipe('qt6-base')['version']
+        self.assertNotIn(':', version)
+        self.assertGreater(pkgrepo.vercmp(version, '6.12.0-5'), 0)
+        self.assertLess(pkgrepo.vercmp(version, '6.12.0-6'), 0)
+        self.assertNotIn('track', pkgrepo.pin('qt6-base'))
+
     def test_architectures(self):
         self.assertEqual(pkgrepo.recipe('mesa')['arch'], ['aarch64'])
         self.assertEqual(pkgrepo.recipe('omacalc')['arch'], ['armv7h'])
@@ -155,6 +163,12 @@ class Plan(unittest.TestCase):
         with mock.patch.object(pkgrepo, 'waiting', lambda name: False):
             builds = {(b['package'], b['arch']) for b in pkgrepo.json.loads(self.plan({})['matrix'])['include']}
         self.assertLessEqual({('omarchy-a', 'aarch64'), ('omarchy-a', 'armv7h')}, builds)
+
+    def test_a_long_build_gets_more_time(self):
+        builds = pkgrepo.json.loads(self.plan({})['matrix'])['include']
+        timeouts = {b['package']: b['timeout'] for b in builds}
+        self.assertEqual(timeouts['labwc'], 90)
+        self.assertGreater(timeouts['qt6-base'], 90)
 
     def test_nothing_builds_when_every_version_is_published(self):
         result = self.plan(self.everything())

@@ -46,6 +46,9 @@ ARCHES = BASES['arch']['arches']
 REPOSITORY = os.environ.get('GITHUB_REPOSITORY', 'OrchardLinux/packages')
 # Packages whose compile is long enough for a compiler cache to pay.
 CCACHE = {'mesa'}
+# Minutes a build job may take: Qt's base compiles for hours on the 4-core runners.
+TIMEOUT = 90
+TIMEOUTS = {'qt6-base': 300}
 ORCHARD = 'OrchardLinux/orchard'
 
 
@@ -219,7 +222,7 @@ def plan(args):
                 where = f'{base}/{arch}'
                 if index.get(name) != built['version']:
                     builds.append({'package': name, 'base': base, 'arch': arch, 'version': built['version'],
-                                   'ccache': name in CCACHE})
+                                   'ccache': name in CCACHE, 'timeout': TIMEOUTS.get(name, TIMEOUT)})
                     print(f'build   {where:15} {name} {built["version"]} (published: {index.get(name, "nothing")})',
                           file=sys.stderr)
                 elif recorded.get(name, {}).get('recipe') not in (None, recipe_digest(name, base)):
