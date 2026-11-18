@@ -3,12 +3,20 @@
 # on an arm64 host; with CCACHE=1 the compiler cache is kept in .ccache/.
 #
 #   ci/build-package BASE PACKAGE ARCH VERSION      BASE: arch or alpine
+#
+# A build outside CI (a distribution's local image build) may set:
+#   OUT=DIR         receives the package instead of out/
+#   LOCAL_REPO=DIR  packages built before this one (*.pkg.tar.zst, Arch only):
+#                   the build takes them ahead of the published [orchard]
+#   PACKAGER=TEXT   the packager the package names (default: the CI's)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
 base=$1 package=$2 arch=$3 version=$4
-mkdir -p "$repo/out"
-mounts=(-v "$repo:/repo:ro" -v "$repo/out:/out")
+out=${OUT:-$repo/out}
+mkdir -p "$out"
+mounts=(-v "$repo:/repo:ro" -v "$out:/out")
+[[ -z ${PACKAGER:-} ]] || mounts+=(-e PACKAGER)
 if [[ ${CCACHE:-} == 1 ]]; then
   mkdir -p "$repo/.ccache"
   mounts+=(-v "$repo/.ccache:/ccache")
@@ -20,5 +28,6 @@ if [[ $base == alpine ]]; then
 else
   # The published repository, for what the package needs from it.
   mounts+=(-e ORCHARD_SERVER_BASE="https://github.com/${GITHUB_REPOSITORY:-OrchardLinux/packages}/releases/download")
+  [[ -z ${LOCAL_REPO:-} ]] || mounts+=(-v "$(cd "$LOCAL_REPO" && pwd):/local:ro")
   "$here/container" "$arch" "${mounts[@]}" -- bash /repo/ci/container-build "$package" "$version"
 fi
