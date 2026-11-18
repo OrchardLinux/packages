@@ -7,12 +7,23 @@
 #   /repo    this repository, read-only
 #   /out     receives the package
 #   /ccache  the compiler cache, when the package uses one
+#   /local   packages built before this one outside CI (ci/build-package
+#            LOCAL_REPO), taken ahead of the published [orchard]
 set -euo pipefail
 package=$1
 version=$2
 : "${ORCHARD_ARCH:?}" "${ORCHARD_SERVER_BASE:?}"
 bash /repo/ci/prepare-pacman
 bash /repo/ci/tablet-repos /etc/pacman.conf "$ORCHARD_ARCH" "$ORCHARD_SERVER_BASE" --trust
+shopt -s nullglob
+local_packages=(/local/*.pkg.tar.zst)
+shopt -u nullglob
+if (( ${#local_packages[@]} )); then
+  mkdir /tmp/local
+  cp "${local_packages[@]}" /tmp/local/
+  repo-add -q /tmp/local/local.db.tar.gz /tmp/local/*.pkg.tar.zst
+  sed -i "/^\[orchard\]/i [local]\nSigLevel = Optional TrustAll\nServer = file:///tmp/local\n" /etc/pacman.conf
+fi
 pacman -Sy
 tools=(base-devel git)
 [[ ! -d /ccache ]] || tools+=(ccache)
@@ -43,7 +54,7 @@ sed -i "s/^#\?MAKEFLAGS=.*/MAKEFLAGS=\"-j$(nproc)\"/; s/^PKGEXT=.*/PKGEXT='.pkg.
 [[ $ORCHARD_ARCH != armv7h ]] || sed -i 's/ -Wl,-z,pack-relative-relocs//g' /etc/makepkg.conf
 # No separate -debug packages: the repository carries what tablets install.
 sed -i '/^OPTIONS=/{s/!debug/debug/; s/\bdebug\b/!debug/}' /etc/makepkg.conf
-as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER='OrchardLinux packages (CI)'
+as_builder=(runuser -u builder -- env HOME=/home/builder PKGDEST=/out PACKAGER="${PACKAGER:-OrchardLinux packages (CI)}"
   CCACHE_DIR=/ccache CCACHE_BASEDIR=/build CCACHE_NOHASHDIR=1 CCACHE_MAXSIZE=2G)
 cd "$build"
 test "$("${as_builder[@]}" bash -c 'source /etc/makepkg.conf; echo "$CARCH"')" = "$ORCHARD_ARCH"

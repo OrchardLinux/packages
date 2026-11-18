@@ -3,6 +3,8 @@
 
   pkgrepo check                       every recipe agrees with its source pin
   pkgrepo plan [--package NAME]       which packages the published repositories lack (JSON for CI)
+  pkgrepo local --arch ARCH NAME...   for a local build of NAME...: their build order, and which of them
+                                      the published repository lacks as recipe stands (JSON)
   pkgrepo record [--base B] STATE NAME...
                                       note the recipes the named packages were built from in STATE
   pkgrepo bump [--repository R] [--package NAME] [--tag TAG]
@@ -241,6 +243,60 @@ def plan(args):
         sys.stdout.write(lines)
 
 
+def relations(name, arch, base='arch'):
+    """(what NAME's recipe needs to build and run, what it provides): plain package names.
+
+    Needs are depends, makedepends and checkdepends, ARCH's own lists
+    (depends_aarch64) included; provides are its name and provides. Version
+    constraints are dropped, and names made with shell expansions skipped.
+    """
+    text = recipe(name, base)['text']
+
+    def words(keys):
+        found = set()
+        for key in keys:
+            for body in re.findall(rf'^{key}=\((.*?)\)', text, re.M | re.S):
+                body = re.sub(r'#[^\n]*', '', body)
+                for quoted in re.findall(r"""'([^']*)'|"([^"]*)"|([^\s'"]+)""", body):
+                    word = re.split(r'[<>=:]', next(part for part in quoted if part), maxsplit=1)[0]
+                    if word and '$' not in word:
+                        found.add(word)
+        return found
+    needs = words(f'{kind}depends{suffix}' for kind in ('', 'make', 'check') for suffix in ('', '_' + arch))
+    return needs, words(('provides', 'provides_' + arch)) | {name}
+
+
+def local(args):
+    """What a local build of NAMES needs, in build order: each one's version, recipe digest, the
+    published version, whether the published package is this recipe's (else it is built), and
+    which of NAMES it needs (to build after them, against them)."""
+    for name in args.names:
+        if args.arch not in recipe(name)['arch']:
+            fail(f'{name} has no {args.arch} recipe')
+    provider, needs = {}, {}
+    for name in args.names:
+        provider.update((provided, name) for provided in relations(name, args.arch)[1])
+    for name in args.names:
+        needs[name] = sorted({provider[word] for word in relations(name, args.arch)[0]
+                              if word in provider and provider[word] != name})
+    order, placed = [], set()
+    while len(order) < len(args.names):
+        ready = sorted(name for name in args.names if name not in placed and set(needs[name]) <= placed)
+        if not ready:
+            fail('the recipes need each other: ' + ', '.join(sorted(set(args.names) - placed)))
+        order += ready
+        placed.update(ready)
+    index, recorded = published(args.arch), state(args.arch)
+    rows = []
+    for name in order:
+        built, digest = recipe(name), recipe_digest(name)
+        # As plan decides for CI: the published version, and (when recorded) the same recipe.
+        current = index.get(name) == built['version'] and recorded.get(name, {}).get('recipe') in (None, digest)
+        rows.append({'name': name, 'version': built['version'], 'recipe': digest, 'published': index.get(name),
+                     'build': not current, 'needs': needs[name]})
+    print(json.dumps({'arch': args.arch, 'packages': rows}, indent=2))
+
+
 def waiting(name):
     """A package that follows its source's releases and has none pinned yet (omarchy-a before its first)."""
     source = pin(name)
@@ -449,6 +505,10 @@ def main():
     sub = commands.add_parser('plan')
     sub.add_argument('--package')
     sub.set_defaults(run=plan)
+    sub = commands.add_parser('local')
+    sub.add_argument('--arch', choices=ARCHES, required=True)
+    sub.add_argument('names', nargs='+')
+    sub.set_defaults(run=local)
     sub = commands.add_parser('record')
     sub.add_argument('--base', choices=sorted(BASES), default='arch')
     sub.add_argument('state')

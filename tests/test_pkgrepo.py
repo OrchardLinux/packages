@@ -4,6 +4,7 @@ from importlib.util import module_from_spec, spec_from_loader
 import gzip
 import hashlib
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import shutil
@@ -192,6 +193,49 @@ def apkindex(packages, signed=True):
     if signed:
         parts.insert(0, gzip.compress(tar([('.SIGN.RSA.orchard.rsa.pub', b'signature')], False)))
     return b''.join(parts)
+
+
+class Local(unittest.TestCase):
+    """pkgrepo local: what a distribution's local image build compiles, and in which order."""
+    NAMES = ['labwc', 'wlroots0.20', 'mesa', 'omafox']
+
+    def run_local(self, published, recorded=None):
+        output = io.StringIO()
+        with mock.patch.object(pkgrepo, 'published', lambda arch, base='arch': published), \
+                mock.patch.object(pkgrepo, 'state', lambda arch, base='arch': recorded or {}), \
+                mock.patch('sys.stdout', output):
+            pkgrepo.local(SimpleNamespace(arch='aarch64', names=self.NAMES))
+        return {row['name']: row for row in json.loads(output.getvalue())['packages']}, \
+            [row['name'] for row in json.loads(output.getvalue())['packages']]
+
+    def current(self):
+        return {name: pkgrepo.recipe(name)['version'] for name in self.NAMES}
+
+    def test_a_package_builds_after_what_it_needs_of_the_others(self):
+        rows, order = self.run_local({})
+        # labwc links wlroots; wlroots needs an opengl-driver, which Mesa provides.
+        self.assertLess(order.index('mesa'), order.index('wlroots0.20'))
+        self.assertLess(order.index('wlroots0.20'), order.index('labwc'))
+        self.assertEqual(rows['labwc']['needs'], ['wlroots0.20'])
+        self.assertEqual(rows['omafox']['needs'], [])
+        self.assertTrue(all(row['build'] for row in rows.values()))
+
+    def test_published_packages_of_the_same_recipe_are_not_built(self):
+        recorded = {name: {'recipe': pkgrepo.recipe_digest(name)} for name in self.NAMES}
+        rows, _ = self.run_local(self.current(), recorded)
+        self.assertFalse(any(row['build'] for row in rows.values()))
+
+    def test_a_recipe_ahead_of_the_published_version_builds(self):
+        published = {**self.current(), 'labwc': '1:0.20.2-1'}
+        rows, _ = self.run_local(published)
+        self.assertEqual([name for name, row in rows.items() if row['build']], ['labwc'])
+        self.assertEqual(rows['labwc']['published'], '1:0.20.2-1')
+
+    def test_a_changed_recipe_under_the_published_version_builds(self):
+        recorded = {name: {'recipe': pkgrepo.recipe_digest(name)} for name in self.NAMES}
+        recorded['wlroots0.20'] = {'recipe': 'an older recipe'}
+        rows, _ = self.run_local(self.current(), recorded)
+        self.assertEqual([name for name, row in rows.items() if row['build']], ['wlroots0.20'])
 
 
 class Orchard(unittest.TestCase):

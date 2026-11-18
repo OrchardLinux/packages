@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a command in the Arch Linux ARM container of one architecture, on an
-# arm64 host with Docker (GitHub's ubuntu-24.04-arm runners).
+# arm64 host with Docker (GitHub's ubuntu-24.04-arm runners) or Podman.
 #
 #   ci/container ARCH [DOCKER-RUN-OPTIONS... --] COMMAND...
 #
@@ -12,8 +12,15 @@
 # containers run in the 64-bit kernel's 32-bit mode: no emulation. Inside,
 # `uname -m` then says armv8l, so the scripts in this directory name the
 # architecture themselves (ORCHARD_ARCH, without the base).
+#
+# Docker runs it, as on GitHub's runners; where no Docker daemon answers (a
+# Mac with Podman's VM), Podman does. CONTAINER_ENGINE=docker|podman chooses.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+engine=${CONTAINER_ENGINE:-}
+if [[ -z $engine ]]; then
+  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then engine=docker; else engine=podman; fi
+fi
 arch=$1; shift
 options=()
 for ((i = 1; i <= $#; i++)); do
@@ -25,17 +32,21 @@ case "$arch" in
   aarch64) platform=linux/arm64; wrap=() ;;
   armv7h)
     platform=linux/arm/v7; wrap=(linux32)
-    if ! docker image inspect "$image" >/dev/null 2>&1; then
+    if ! "$engine" image inspect "$image" >/dev/null 2>&1; then
       archive=$(mktemp)
       trap 'rm -f -- "$archive"' EXIT
       curl -fL --retry 3 --max-time 600 -o "$archive" "$(value bootstrap)"
       echo "$(value sha256)  $archive" | sha256sum -c -
-      docker import --platform "$platform" "$archive" "$image" >/dev/null
+      if [[ $engine == podman ]]; then
+        podman import --arch arm --variant v7 "$archive" "$image" >/dev/null
+      else
+        docker import --platform "$platform" "$archive" "$image" >/dev/null
+      fi
       rm -f -- "$archive"
     fi ;;
   alpine-aarch64) platform=linux/arm64; wrap=() ;;
   alpine-armv7) platform=linux/arm/v7; wrap=(linux32) ;;
   *) echo "ci/container: unknown architecture $arch" >&2; exit 2 ;;
 esac
-exec docker run --rm --platform "$platform" -e ORCHARD_ARCH="${arch#alpine-}" -e RANK_MIRRORS_ARCH="$arch" \
+exec "$engine" run --rm --platform "$platform" -e ORCHARD_ARCH="${arch#alpine-}" -e RANK_MIRRORS_ARCH="$arch" \
   "${options[@]}" "$image" "${wrap[@]}" "$@"

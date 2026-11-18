@@ -163,13 +163,20 @@ runner's 64-bit kernel in 32-bit mode, without emulation. Each build first
 updates its container fully, installs what the recipe names, and runs
 `makepkg` as an unprivileged user. Mesa keeps a compiler cache between builds.
 
-Locally, on an arm64 Linux host with Docker:
+Locally, on an arm64 Linux host with Docker, or a Mac with Podman's VM:
 
 ```sh
 ci/build-package arch labwc aarch64 1:0.20.2-1                    # package in out/
 ci/build-package alpine linux-orchard-apple-16k aarch64 0.3.1-r0
 python3 -m unittest discover -s tests
 ```
+
+To try a change in an image before it is published, build the distribution with
+this checkout: `orchard build --packages ../packages` in omarchy-a (or `packages`
+in its `orchard.local.toml`). It asks `tools/pkgrepo local` which of the image's
+packages have a recipe here that the published repository lacks, and builds those
+with `ci/build-package` (`OUT`: where the package goes, `LOCAL_REPO`: the ones built
+before it, which it builds against).
 
 ## License
 
