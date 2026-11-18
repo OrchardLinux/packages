@@ -5,7 +5,7 @@
 # checksum (`tools/pkgrepo orchard-release VERSION` writes both).
 pkgname=linux-orchard-apple-armv7
 _platform=apple-armv7
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=0
 pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple 32-bit SoCs (A5 to A6X)"
 url="https://github.com/OrchardLinux/orchard"
@@ -26,5 +26,5 @@ package() {
 }
 
 sha512sums="
-df314d30fa1b37bb72689317ff54bfed7c4c4c473b86b47e76606d9d2f82dbd8d6e7a52977149610ef39fd3f8187faaea01f26bbc5bd85a8d3599c2342bbf52b  platform-$_platform-$pkgver.tar.gz
+2ca19b6c2ba56106c46222a66117289894b48e4e716de3cfb9955e70a7ca4df107e04d77bfe239ac61ab1abaa1000535533d6a2958359d686d8341e8d33f6f04  platform-$_platform-$pkgver.tar.gz
 "
