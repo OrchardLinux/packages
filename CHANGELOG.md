@@ -12,6 +12,12 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## 2026-11-20
 
+### labwc 1:0.20.2-6
+
+- A swipe up from the bottom edge reaches the notification center and the
+  control center as their own drag, which follows the finger, instead of
+  closing them at once.
+
 ### labwc 1:0.20.2-5
 
 - A touch no longer leaves a hidden cursor behind that hovers whatever ends
