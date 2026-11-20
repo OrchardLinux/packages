@@ -1,0 +1,48 @@
+From 511a8aeb680ee107b6b7f0ca27ae49fa6aa82dd0 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 20 Nov 2026 07:59:50 +0800
+Subject: [PATCH] Give no pointer focus while the cursor is hidden
+
+Touch input warps the cursor to the finger and hides it, and clears
+pointer focus. But the next focus update (a window or layer surface
+mapped, moved or unmapped under the hidden cursor) entered the surface
+left under it, so that surface showed hover states, tooltips and close
+marks that no pointer caused, on a touch-only tablet as well.
+
+While the cursor is hidden, by touch input or because no pointer has
+been used yet, a focus update clears pointer focus instead. The next
+pointer motion, button or axis event shows the cursor and focuses as
+usual.
+
+Assisted-by: LLM
+---
+ src/input/cursor.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/input/cursor.c b/src/input/cursor.c
+index f998ef9..f0ad939 100644
+--- a/src/input/cursor.c
++++ b/src/input/cursor.c
+@@ -712,6 +712,19 @@ cursor_process_motion(uint32_t time, double *sx, double *sy)
+ static void
+ _cursor_update_focus(void)
+ {
++	/*
++	 * A hidden cursor (touch input hid it, or no pointer input yet) points
++	 * at nothing: touch input warps it to the finger, and giving the
++	 * surface left under it pointer focus when the scene changes (a
++	 * window or layer surface mapped, moved or unmapped) makes that
++	 * surface show hover states no pointer caused. The next pointer
++	 * input shows the cursor and focuses as usual.
++	 */
++	if (!server.seat.cursor_visible) {
++		wlr_seat_pointer_notify_clear_focus(server.seat.wlr_seat);
++		return;
++	}
++
+ 	/* Focus surface under cursor if it isn't already focused */
+ 	struct cursor_context ctx = get_cursor_context();
+ 
+-- 
+2.54.0 (Apple Git-157)
+
