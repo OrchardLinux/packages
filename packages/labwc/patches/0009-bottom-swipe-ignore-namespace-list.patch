@@ -1,0 +1,71 @@
+From dc39b24815a8032b4d18749bb8be64b426a89c32 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 20 Nov 2026 09:13:46 +0800
+Subject: [PATCH] Ignore the bottom-edge swipe over any of several namespaces
+
+bottomSwipeIgnoreNamespace named one layer-shell namespace, the
+on-screen keyboard's, over which the bottom-edge swipe is left to the
+surface. A shell's own sheets (a notification center, a control center)
+need the swipe too, as their own drag that follows the finger instead
+of the gesture's command firing at once. It takes a comma-separated
+list now; a single name works as before.
+
+Assisted-by: LLM
+---
+ src/input/touch.c | 31 ++++++++++++++++++++++++++++---
+ 1 file changed, 28 insertions(+), 3 deletions(-)
+
+diff --git a/src/input/touch.c b/src/input/touch.c
+index 26e2d42..e81450c 100644
+--- a/src/input/touch.c
++++ b/src/input/touch.c
+@@ -112,10 +112,35 @@ bottom_swipe_output(double lx, double ly, struct output **lab_output)
+ 	return (struct bottom_swipe_box){box.x, box.y, box.width, box.height};
+ }
+ 
++/* Whether name is one of the comma-separated names in list. */
+ static bool
+-bottom_swipe_ignored(struct output *output, const char *namespace)
++namespace_listed(const char *list, const char *name)
+ {
+-	if (!output || !namespace || !*namespace) {
++	size_t length = strlen(name);
++	const char *at = list;
++	while (*at) {
++		const char *end = strchr(at, ',');
++		size_t span = end ? (size_t)(end - at) : strlen(at);
++		if (span == length && !strncmp(at, name, length)) {
++			return true;
++		}
++		if (!end) {
++			break;
++		}
++		at = end + 1;
++	}
++	return false;
++}
++
++/*
++ * The swipe is left to the surface under it while a layer surface of one of
++ * the listed namespaces (comma-separated) is mapped: the on-screen keyboard
++ * takes it as typing, a shell sheet as its own drag.
++ */
++static bool
++bottom_swipe_ignored(struct output *output, const char *namespaces)
++{
++	if (!output || !namespaces || !*namespaces) {
+ 		return false;
+ 	}
+ 	for (size_t i = 0; i < ARRAY_SIZE(output->layer_tree); ++i) {
+@@ -123,7 +148,7 @@ bottom_swipe_ignored(struct output *output, const char *namespace)
+ 		wl_list_for_each(node, &output->layer_tree[i]->children, link) {
+ 			struct lab_layer_surface *layer = node_layer_surface_from_node(node);
+ 			if (layer->mapped && layer->layer_surface->namespace
+-					&& !strcmp(layer->layer_surface->namespace, namespace)) {
++					&& namespace_listed(namespaces, layer->layer_surface->namespace)) {
+ 				return true;
+ 			}
+ 		}
+-- 
+2.54.0 (Apple Git-157)
+

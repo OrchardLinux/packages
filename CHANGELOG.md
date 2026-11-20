@@ -10,6 +10,14 @@ under the package and the version it builds (`epoch:pkgver-pkgrel`). A push
 to `main` publishes every changed version at once, so when merging, rename
 **Unreleased** to that day's date (`## 2026-11-20`).
 
+## Unreleased
+
+### labwc 1:0.20.2-6
+
+- A swipe up from the bottom edge reaches the notification center and the
+  control center as their own drag, which follows the finger, instead of
+  closing them at once.
+
 ## 2026-11-20
 
 ### labwc 1:0.20.2-5
