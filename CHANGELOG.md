@@ -10,6 +10,15 @@ under the package and the version it builds (`epoch:pkgver-pkgrel`). A push
 to `main` publishes every changed version at once, so when merging, rename
 **Unreleased** to that day's date (`## 2026-11-20`).
 
+## Unreleased
+
+### labwc 1:0.20.2-7
+
+- In the overview, a long press on a window (a right click, the Menu key)
+  offers Minimize, Maximize or Restore, and Close, the buttons of a title
+  bar for a window that has none. A tap beside the menu puts it away and
+  leaves the overview open.
+
 ## 2026-11-20
 
 ### labwc 1:0.20.2-6

@@ -1,0 +1,431 @@
+From 46c41ce058ee82802e01b58fad68c36ca702ff70 Mon Sep 17 00:00:00 2001
+From: Henrik Klee <henrik@goat-code.com>
+Date: Fri, 20 Nov 2026 22:44:37 +0800
+Subject: [PATCH] Overview: a card's menu with Minimize, Maximize/Restore and
+ Close
+
+A window whose title bar is hidden (maximized windows on a tablet) has
+no buttons left to make it smaller again. A long press on its card in
+the overview (a right click, the Menu key on the selected card) brings
+up the title bar's buttons as a menu over the overview: Minimize (not
+for a minimized window), Maximize or Restore, Close. A tap beside the
+menu (Escape) puts only the menu away; the overview stays. Minimize and
+Maximize/Restore leave for the desktop, where the change is seen; Close
+takes the card away as a flick up does, and the overview stays.
+
+The rows are 44 pixels high for a finger, in the theme's menu colors.
+
+Assisted-by: LLM
+---
+ include/overview.h |   2 +
+ src/input/cursor.c |   7 ++
+ src/overview.c     | 266 +++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 275 insertions(+)
+
+diff --git a/include/overview.h b/include/overview.h
+index b1dbaf8..bc46628 100644
+--- a/include/overview.h
++++ b/include/overview.h
+@@ -46,6 +46,8 @@ bool overview_handle_key(xkb_keysym_t sym);
+  * the panel's.
+  */
+ bool overview_press(double lx, double ly, uint32_t time_msec);
++/* A right click: the menu of the card under it. False beside the overview. */
++bool overview_context(double lx, double ly);
+ void overview_motion(double lx, double ly, uint32_t time_msec);
+ void overview_release(uint32_t time_msec);
+ void overview_press_cancel(void);
+diff --git a/src/input/cursor.c b/src/input/cursor.c
+index f0ad939..3ac19ec 100644
+--- a/src/input/cursor.c
++++ b/src/input/cursor.c
+@@ -2,6 +2,7 @@
+ #define _POSIX_C_SOURCE 200809L
+ #include "input/cursor.h"
+ #include <assert.h>
++#include <linux/input-event-codes.h>
+ #include <time.h>
+ #include <wlr/config.h>
+ #include <wlr/types/wlr_cursor.h>
+@@ -1162,6 +1163,12 @@ bool
+ cursor_process_button_press(struct seat *seat, uint32_t button, uint32_t time_msec)
+ {
+ 	keyboard_cancel_super_release();
++	/* A right click on a card: its menu, as a long press. */
++	if (server.input_mode == LAB_INPUT_STATE_OVERVIEW && button == BTN_RIGHT
++			&& overview_context(seat->cursor->x, seat->cursor->y)) {
++		lab_set_add(&seat->bound_buttons, button);
++		return false;
++	}
+ 	/* A press beside the overview (on a panel) closes it and goes on. */
+ 	if (server.input_mode == LAB_INPUT_STATE_OVERVIEW
+ 			&& overview_press(seat->cursor->x, seat->cursor->y, time_msec)) {
+diff --git a/src/overview.c b/src/overview.c
+index 58adb0b..c4fc34b 100644
+--- a/src/overview.c
++++ b/src/overview.c
+@@ -184,6 +184,27 @@ static struct {
+ 	double began; /* 0 until its first frame: preparing must not eat the fade */
+ } cover;
+ 
++#define CARD_MENU_HOLD_MS 450
++#define CARD_MENU_ITEM_HEIGHT 44
++#define CARD_MENU_WIDTH 220
++#define CARD_MENU_PAD_X 16
++
++enum card_menu_item { CARD_MENU_MINIMIZE, CARD_MENU_MAXIMIZE, CARD_MENU_CLOSE };
++
++static struct {
++	struct card *card;
++	struct view *view;
++	struct wlr_scene_tree *tree;
++	struct wlr_scene_rect *highlight;
++	struct wlr_box box;      /* where it is, in layout coordinates */
++	enum card_menu_item items[3];
++	int nr_items;
++	int current;             /* highlighted item, or -1 */
++	bool pressing;           /* a press began on it */
++	struct wl_event_source *hold; /* a press held still on a card */
++} card_menu = { .current = -1 };
++
++static void card_menu_close(void);
+ static void finish(struct view *chosen);
+ static void destroy(void);
+ 
+@@ -877,6 +898,9 @@ card_destroy(struct card *card)
+ 	if (ov.selected == card) {
+ 		ov.selected = NULL;
+ 	}
++	if (card_menu.card == card) {
++		card_menu_close();
++	}
+ 	if (ov.press.card == card) {
+ 		ov.press.card = NULL;
+ 		ov.press.drag = DRAG_NONE;
+@@ -1316,6 +1340,9 @@ destroy(void)
+ 		return;
+ 	}
+ 	struct output *output = ov.output;
++	/* Its tree goes with the overview's. */
++	card_menu.tree = NULL;
++	card_menu_close();
+ 	struct card *card, *tmp;
+ 	wl_list_for_each_safe(card, tmp, &ov.cards, link) {
+ 		card_destroy(card);
+@@ -1532,6 +1559,7 @@ finish(struct view *chosen)
+ 		return;
+ 	}
+ 	announce_close();
++	card_menu_close();
+ 	int index = 0;
+ 	struct card *card = chosen ? card_of(chosen, &index) : NULL;
+ 	ov.press.down = false;
+@@ -1807,6 +1835,165 @@ overview_on_view_mapped(struct view *view)
+ 	overview_abort();
+ }
+ 
++/*
++ * A card's menu: a long press on it (a right click, the Menu key) offers what
++ * a title bar's buttons do, for a window that has none. It lies over the
++ * overview; a tap beside it puts it away and leaves the overview open.
++ */
++
++
++static void
++card_menu_highlight(int index)
++{
++	card_menu.current = index;
++	if (!card_menu.highlight) {
++		return;
++	}
++	wlr_scene_node_set_enabled(&card_menu.highlight->node, index >= 0);
++	if (index >= 0) {
++		wlr_scene_node_set_position(&card_menu.highlight->node,
++			rc.theme->menu_border_width, rc.theme->menu_border_width
++				+ index * CARD_MENU_ITEM_HEIGHT);
++	}
++}
++
++static void
++card_menu_close(void)
++{
++	if (card_menu.hold) {
++		wl_event_source_timer_update(card_menu.hold, 0);
++	}
++	if (card_menu.tree) {
++		wlr_scene_node_destroy(&card_menu.tree->node);
++	}
++	struct wl_event_source *hold = card_menu.hold;
++	memset(&card_menu, 0, sizeof(card_menu));
++	card_menu.hold = hold;
++	card_menu.current = -1;
++}
++
++static const char *
++card_menu_label(enum card_menu_item item, struct view *view)
++{
++	switch (item) {
++	case CARD_MENU_MINIMIZE:
++		return _("Minimize");
++	case CARD_MENU_MAXIMIZE:
++		return view->maximized == VIEW_AXIS_BOTH ? _("Restore") : _("Maximize");
++	case CARD_MENU_CLOSE:
++		return _("Close");
++	}
++	return "";
++}
++
++static void
++card_menu_open(struct card *card, double lx, double ly)
++{
++	card_menu_close();
++	if (!card || card->closing || ov.state == CLOSED) {
++		return;
++	}
++	struct theme *theme = rc.theme;
++	struct view *view = card->parts[0].view;
++	card_menu.card = card;
++	card_menu.view = view;
++	if (!view->minimized) {
++		card_menu.items[card_menu.nr_items++] = CARD_MENU_MINIMIZE;
++	}
++	card_menu.items[card_menu.nr_items++] = CARD_MENU_MAXIMIZE;
++	card_menu.items[card_menu.nr_items++] = CARD_MENU_CLOSE;
++
++	int border = theme->menu_border_width;
++	int width = CARD_MENU_WIDTH, height = card_menu.nr_items * CARD_MENU_ITEM_HEIGHT + 2 * border;
++	/* Under the finger, kept on the screen. */
++	int x = clamp(lx - width / 2.0, ov.box.x + 8, ov.box.x + ov.box.width - width - 8);
++	int y = clamp(ly + 8, ov.box.y + 8, ov.box.y + ov.box.height - height - 8);
++	card_menu.box = (struct wlr_box){x, y, width, height};
++
++	card_menu.tree = lab_wlr_scene_tree_create(ov.tree);
++	wlr_scene_node_set_position(&card_menu.tree->node, x - ov.box.x, y - ov.box.y);
++	lab_wlr_scene_rect_create(card_menu.tree, width, height, theme->menu_border_color);
++	struct wlr_scene_rect *bg = lab_wlr_scene_rect_create(card_menu.tree,
++		width - 2 * border, height - 2 * border, theme->menu_items_bg_color);
++	wlr_scene_node_set_position(&bg->node, border, border);
++	card_menu.highlight = lab_wlr_scene_rect_create(card_menu.tree, width - 2 * border,
++		CARD_MENU_ITEM_HEIGHT, theme->menu_items_active_bg_color);
++	for (int i = 0; i < card_menu.nr_items; i++) {
++		struct scaled_font_buffer *text = scaled_font_buffer_create(card_menu.tree);
++		scaled_font_buffer_update(text, card_menu_label(card_menu.items[i], view),
++			width - 2 * CARD_MENU_PAD_X, &rc.font_menuitem,
++			theme->menu_items_text_color, (float[4]){0});
++		wlr_scene_node_set_position(&text->scene_buffer->node, CARD_MENU_PAD_X,
++			border + i * CARD_MENU_ITEM_HEIGHT + (CARD_MENU_ITEM_HEIGHT - text->height) / 2);
++	}
++	card_menu_highlight(ov.keyboard ? 0 : -1);
++	redraw();
++}
++
++static int
++card_menu_item_at(double lx, double ly)
++{
++	if (!card_menu.tree || lx < card_menu.box.x || lx >= card_menu.box.x + card_menu.box.width
++			|| ly < card_menu.box.y || ly >= card_menu.box.y + card_menu.box.height) {
++		return -1;
++	}
++	int index = (ly - card_menu.box.y - rc.theme->menu_border_width) / CARD_MENU_ITEM_HEIGHT;
++	return index >= 0 && index < card_menu.nr_items ? index : -1;
++}
++
++/*
++ * The window's own buttons: Minimize and Maximize/Restore leave the overview
++ * for the desktop, where what changed is seen; Close takes its card away as a
++ * flick up does, and the overview stays.
++ */
++static void
++card_menu_run(int index)
++{
++	if (index < 0 || index >= card_menu.nr_items) {
++		return;
++	}
++	enum card_menu_item item = card_menu.items[index];
++	struct card *card = card_menu.card;
++	struct view *view = card_menu.view;
++	card_menu_close();
++	switch (item) {
++	case CARD_MENU_MINIMIZE:
++		finish(NULL);
++		view_minimize(view, true);
++		break;
++	case CARD_MENU_MAXIMIZE:
++		/* First, so its card grows back to where the window is now. */
++		view_toggle_maximize(view, VIEW_AXIS_BOTH);
++		finish(view);
++		break;
++	case CARD_MENU_CLOSE:
++		close_card(card);
++		break;
++	}
++	redraw();
++}
++
++static int
++card_menu_hold_fired(void *data)
++{
++	if (ov.press.down && !ov.press.moved && ov.press.card && overview_active()) {
++		struct card *card = ov.press.card;
++		/* The press is the menu's now: lifting the finger does nothing. */
++		ov.press.down = false;
++		card_menu_open(card, ov.press.x, ov.press.y);
++	}
++	return 0;
++}
++
++static void
++card_menu_hold_arm(bool armed)
++{
++	if (!card_menu.hold) {
++		card_menu.hold = wl_event_loop_add_timer(server.wl_event_loop, card_menu_hold_fired, NULL);
++	}
++	wl_event_source_timer_update(card_menu.hold, armed ? CARD_MENU_HOLD_MS : 0);
++}
++
+ /*
+  * Input
+  */
+@@ -1851,12 +2038,40 @@ card_at(double lx, double ly, int *part)
+ 	return NULL;
+ }
+ 
++bool
++overview_context(double lx, double ly)
++{
++	if (!overview_active() || ov.state == TRACKING) {
++		return false;
++	}
++	int part;
++	struct card *card = card_at(lx, ly, &part);
++	if (!card) {
++		card_menu_close();
++		redraw();
++		return card_menu.tree == NULL && on_overview(lx, ly);
++	}
++	card_menu_open(card, lx, ly);
++	return true;
++}
++
+ bool
+ overview_press(double lx, double ly, uint32_t time_msec)
+ {
+ 	if (!overview_active()) {
+ 		return false;
+ 	}
++	if (card_menu.tree) {
++		/* On the menu, a choice; beside it, only the menu goes. */
++		card_menu.pressing = card_menu_item_at(lx, ly) >= 0;
++		if (card_menu.pressing) {
++			card_menu_highlight(card_menu_item_at(lx, ly));
++		} else {
++			card_menu_close();
++		}
++		redraw();
++		return true;
++	}
+ 	if (!on_overview(lx, ly)) {
+ 		finish(NULL);
+ 		return false;
+@@ -1871,12 +2086,20 @@ overview_press(double lx, double ly, uint32_t time_msec)
+ 	ov.press.scroll0 = ov.scroll;
+ 	ov.press.velocity = 0;
+ 	ov.press.last_time = time_msec;
++	/* Held still on a card, the press brings up its card_menu. */
++	card_menu_hold_arm(ov.press.card != NULL);
+ 	return true;
+ }
+ 
+ void
+ overview_motion(double lx, double ly, uint32_t time_msec)
+ {
++	if (card_menu.pressing) {
++		/* The finger slides over the menu to the one it means. */
++		card_menu_highlight(card_menu_item_at(lx, ly));
++		redraw();
++		return;
++	}
+ 	if (!ov.press.down) {
+ 		return;
+ 	}
+@@ -1888,6 +2111,7 @@ overview_motion(double lx, double ly, uint32_t time_msec)
+ 			return;
+ 		}
+ 		ov.press.moved = true;
++		card_menu_hold_arm(false);
+ 		bool vertical = fabs(dy) > fabs(dx);
+ 		bool scrolls = ov.scroll_max > 0 && vertical != ov.row;
+ 		if (scrolls) {
+@@ -1921,6 +2145,12 @@ overview_motion(double lx, double ly, uint32_t time_msec)
+ void
+ overview_release(uint32_t time_msec)
+ {
++	card_menu_hold_arm(false);
++	if (card_menu.pressing) {
++		card_menu.pressing = false;
++		card_menu_run(card_menu.current);
++		return;
++	}
+ 	if (!ov.press.down) {
+ 		return;
+ 	}
+@@ -1963,6 +2193,11 @@ overview_release(uint32_t time_msec)
+ void
+ overview_press_cancel(void)
+ {
++	card_menu_hold_arm(false);
++	if (card_menu.pressing) {
++		card_menu.pressing = false;
++		card_menu_highlight(-1);
++	}
+ 	ov.press.down = false;
+ 	if (ov.row && ov.state != CLOSED) {
+ 		ov.scroll_target = row_scroll_for(row_index_at(ov.scroll));
+@@ -1992,6 +2227,28 @@ overview_handle_key(xkb_keysym_t sym)
+ 	if (!overview_active() || ov.state == TRACKING) {
+ 		return false;
+ 	}
++	if (card_menu.tree) {
++		/* The menu takes the keys while it is up. */
++		switch (sym) {
++		case XKB_KEY_Escape:
++			card_menu_close();
++			break;
++		case XKB_KEY_Up:
++		case XKB_KEY_Down:
++			card_menu_highlight(((card_menu.current < 0 ? (sym == XKB_KEY_Up ? 0 : -1) : card_menu.current)
++				+ (sym == XKB_KEY_Up ? -1 : 1) + card_menu.nr_items) % card_menu.nr_items);
++			break;
++		case XKB_KEY_Return:
++		case XKB_KEY_KP_Enter:
++		case XKB_KEY_space:
++			card_menu_run(card_menu.current);
++			return true;
++		default:
++			break;
++		}
++		redraw();
++		return true;
++	}
+ 	int count = nr_cards();
+ 	int index = ov.selected ? card_index(ov.selected) : -1;
+ 	int step = 0;
+@@ -1999,6 +2256,15 @@ overview_handle_key(xkb_keysym_t sym)
+ 	case XKB_KEY_Escape:
+ 		finish(NULL);
+ 		return true;
++	case XKB_KEY_Menu:
++		if (ov.selected) {
++			int x, y;
++			wlr_scene_node_coords(&ov.selected->tree->node, &x, &y);
++			ov.keyboard = true;
++			card_menu_open(ov.selected, x + ov.selected->width / 2.0,
++				y + ov.selected->height / 2.0);
++		}
++		return true;
+ 	case XKB_KEY_Return:
+ 	case XKB_KEY_KP_Enter:
+ 	case XKB_KEY_space:
+-- 
+2.54.0 (Apple Git-157)
+

@@ -18,7 +18,7 @@ pkgname=labwc
 _commit=97f28877a343e062f3178d201f0248cd9c2610cf
 epoch=1
 pkgver=0.20.2
-pkgrel=6
+pkgrel=7
 pkgdesc='stacking wayland compositor with look and feel from openbox, with OrchardLinux tablet patches'
 url="https://github.com/labwc/labwc"
 arch=('aarch64' 'armv7h')
@@ -66,6 +66,7 @@ _patches=(
   0007-on-screen-keyboard-listener.patch
   0008-no-pointer-focus-while-cursor-hidden.patch
   0009-bottom-swipe-ignore-namespace-list.patch
+  0010-overview-card-menu.patch
 )
 source=("labwc-${_commit}.tar.gz::https://codeload.github.com/labwc/labwc/tar.gz/${_commit}"
         "${_patches[@]}")
@@ -78,7 +79,8 @@ sha256sums=('022676dbcbf6b6206b97d7bac8a339c8a0203e3e99693107c15b5a6183e4b0ea'
             'a32f6ba1f6254704c42c80098fb74e648d53271a27364014f6928067722e775b'
             'c767678e286a44bc35c18536f2ed7e9fe4d7d0c812dfe024aa30c0d524112283'
             'd0bf697fb73e3cc6e3b3e90448b5bc03903e129477d68f691f0dec1542acfc68'
-            'cfaf13b54c712df2a41dc18d3b9a4358afeecb2384673b2ec44167a7186e9943')
+            'cfaf13b54c712df2a41dc18d3b9a4358afeecb2384673b2ec44167a7186e9943'
+            'f7e017810aa37f54c7db0f18bb92486ba1b7d40892377989d58d96e70c00b9c0')
 
 prepare() {
   local patch
@@ -112,6 +114,8 @@ check() {
   python3 "${startdir}/test-touch-pointer-focus.py" "labwc-${_commit}"
   # The bottom swipe's ignore list (0009).
   python3 "${startdir}/test-swipe-ignore-list.py" "labwc-${_commit}"
+  # A card's menu in the overview (0010).
+  python3 "${startdir}/test-overview-menu.py" "labwc-${_commit}"
 }
 
 package() {
