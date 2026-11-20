@@ -83,6 +83,7 @@ A test tablet installed before kernel packages takes its kernel package once wit
 ## Layout
 
 ```
+CHANGELOG.md                  what each package version changes for a tablet (see its top)
 packages/NAME/source.json     the pinned source: URL, checksum, commit; "track" if it follows a branch
 packages/NAME/patches/        changes to the source, for every base
 packages/NAME/arch/           the Arch recipe (PKGBUILD) and its files
