@@ -1,9 +1,9 @@
 {
   "repository": "OrchardLinux/mesa",
-  "version": "27.0.0.2",
-  "commit": "1f14b5c79d067dfee0e55ea9bc2144be3fa48209",
-  "url": "https://github.com/OrchardLinux/mesa/archive/1f14b5c79d067dfee0e55ea9bc2144be3fa48209.tar.gz",
-  "sha256": "21ee82e578c537824ed33cd5af996decb302625269d8df4aa584a42f700878dd",
-  "tag": "v27.0.0.2",
+  "version": "27.0.0.3",
+  "commit": "60645432fe8944a1c8e249ea9a5f0fb12edc48d5",
+  "url": "https://github.com/OrchardLinux/mesa/archive/60645432fe8944a1c8e249ea9a5f0fb12edc48d5.tar.gz",
+  "sha256": "afd7ffe55150083635b538865f9ceab4ae068ec638a36b046ce4486e72b4b246",
+  "tag": "v27.0.0.3",
   "track": "releases"
 }
