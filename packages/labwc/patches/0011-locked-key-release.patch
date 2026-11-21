@@ -1,0 +1,16 @@
+--- a/src/input/keyboard.c
++++ b/src/input/keyboard.c
+@@ -588,6 +588,13 @@
+ 		return LAB_KEY_HANDLED_TRUE;
+ 	}
+ 
++	/*
++	 * The press goes to the client, so its release must too. A binding
++	 * that matched but does not apply while locked would otherwise stay
++	 * current, and its on-release branch above would swallow the release:
++	 * the lock screen keeps the key pressed and repeats it.
++	 */
++	cur_keybind = NULL;
+ 	return LAB_KEY_HANDLED_FALSE;
+ }
+ 

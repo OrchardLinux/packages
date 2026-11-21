@@ -12,6 +12,12 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## Unreleased
 
+### labwc 1:0.20.2-8
+
+- Pressing Home on the lock screen no longer leaves it held down: the lock
+  screen gets the release too, so it stops repeating the key and keeping
+  the screen lit.
+
 ### labwc 1:0.20.2-7
 
 - In the overview, a long press on a window (a right click, the Menu key)
