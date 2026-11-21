@@ -10,13 +10,15 @@ under the package and the version it builds (`epoch:pkgver-pkgrel`). A push
 to `main` publishes every changed version at once, so when merging, rename
 **Unreleased** to that day's date (`## 2026-11-20`).
 
-## Unreleased
+## 2026-11-22
 
 ### labwc 1:0.20.2-8
 
 - Pressing Home on the lock screen no longer leaves it held down: the lock
   screen gets the release too, so it stops repeating the key and keeping
   the screen lit.
+
+## 2026-11-21
 
 ### labwc 1:0.20.2-7
 
