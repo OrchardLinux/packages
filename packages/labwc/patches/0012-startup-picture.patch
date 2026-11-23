@@ -1,0 +1,186 @@
+diff --git a/include/config/rcxml.h b/include/config/rcxml.h
+index aac21b7..de1c707 100644
+--- a/include/config/rcxml.h
++++ b/include/config/rcxml.h
+@@ -90,6 +90,7 @@ struct rcxml {
+ 	bool startup_fade;
+ 	char *handover_dir;
+ 	bool startup_signal;
++	char *startup_picture;
+ 
+ 	/* <overview live="" swipe="" openCommand="" closeCommand="" /> */
+ 	enum lab_tristate overview_live; /* unspecified: by the renderer */
+diff --git a/include/output.h b/include/output.h
+index 91689d9..c303af1 100644
+--- a/include/output.h
++++ b/include/output.h
+@@ -19,6 +19,7 @@ struct output {
+ 	/* startupFade: black until the desktop shell has drawn, then one fade */
+ 	struct wlr_scene_rect *startup_cover;
+ 	struct wlr_scene_buffer *startup_frame; /* the previous compositor's last frame */
++	bool startup_frame_is_picture; /* startupPicture: the boot splash, not a session's */
+ 	double startup_began, startup_ready_since, startup_fade_began;
+ 	struct wlr_scene_buffer *workspace_osd;
+ 
+diff --git a/src/config/rcxml.c b/src/config/rcxml.c
+index 573652e..d3eff09 100644
+--- a/src/config/rcxml.c
++++ b/src/config/rcxml.c
+@@ -1188,6 +1188,8 @@ entry(xmlNode *node, char *nodename, char *content)
+ 		set_bool(content, &rc.startup_signal);
+ 	} else if (!strcasecmp(nodename, "handoverDirectory.core")) {
+ 		xstrdup_replace(rc.handover_dir, content);
++	} else if (!strcasecmp(nodename, "startupPicture.core")) {
++		xstrdup_replace(rc.startup_picture, content);
+ 
+ 	} else if (!strcasecmp(nodename, "promptCommand.core")) {
+ 		xstrdup_replace(rc.prompt_command, content);
+@@ -2091,6 +2093,7 @@ rcxml_finish(void)
+ 	zfree(rc.font_osd.name);
+ 	zfree(rc.prompt_command);
+ 	zfree(rc.handover_dir);
++	zfree(rc.startup_picture);
+ 	zfree(rc.overview_open_command);
+ 	zfree(rc.overview_close_command);
+ 	zfree(rc.osk_listener);
+diff --git a/src/output.c b/src/output.c
+index 7e6cc48..9e4a7e7 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -556,6 +556,9 @@ rotation_tick(struct output *output)
+ #define STARTUP_QUIET_SECONDS 0.15
+ #define STARTUP_BAR_WAIT_SECONDS 0.6
+ #define STARTUP_TIMEOUT_SECONDS 6.0
++/* The boot picture waits for a whole shell and its lock to start. */
++#define STARTUP_PICTURE_TIMEOUT_SECONDS 20.0
++#define STARTUP_PICTURE_MAGIC "OSPL"
+ #define HANDOVER_MAX_AGE_SECONDS 20
+ #define HANDOVER_MAGIC "LABFRAM1"
+ 
+@@ -712,6 +715,67 @@ out:
+ 	return buffer;
+ }
+ 
++/*
++ * <core><startupPicture>FILE</startupPicture></core>: at boot no compositor
++ * came before, and the panel still shows the boot loader's splash. FILE is
++ * that splash (OSPL, width and height as little-endian u32, then the pixels
++ * as b, g, r, x, top row first); it is drawn as the boot loader drew it,
++ * centred on black on the panel's native mode, in place of the black cover,
++ * so the splash stays until the shell has drawn.
++ */
++static struct wlr_buffer *
++startup_picture_load(struct output *output)
++{
++	struct wlr_output_mode *mode = wlr_output_preferred_mode(output->wlr_output);
++	if (!rc.startup_picture || !mode || mode->width <= 0 || mode->height <= 0
++			|| mode->width > 16384 || mode->height > 16384) {
++		return NULL;
++	}
++	int fd = open(rc.startup_picture, O_RDONLY | O_CLOEXEC);
++	if (fd < 0) {
++		return NULL;
++	}
++	struct wlr_buffer *buffer = NULL;
++	uint32_t *pixels = NULL, *row = NULL;
++	char magic[4];
++	uint32_t size[2];
++	struct stat st;
++	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)
++			|| !read_all(fd, magic, sizeof(magic)) || !read_all(fd, size, sizeof(size))
++			|| memcmp(magic, STARTUP_PICTURE_MAGIC, sizeof(magic))
++			|| !size[0] || !size[1]
++			|| size[0] > (uint32_t)mode->width || size[1] > (uint32_t)mode->height
++			|| (size_t)st.st_size != 12 + (size_t)size[0] * size[1] * 4) {
++		goto out;
++	}
++	size_t width = mode->width, height = mode->height;
++	pixels = malloc(width * height * 4);
++	row = malloc((size_t)size[0] * 4);
++	if (!pixels || !row) {
++		goto out;
++	}
++	for (size_t i = 0; i < width * height; i++) {
++		pixels[i] = 0xff000000;
++	}
++	size_t left = (width - size[0]) / 2, top = (height - size[1]) / 2;
++	for (size_t y = 0; y < size[1]; y++) {
++		if (!read_all(fd, row, (size_t)size[0] * 4)) {
++			goto out;
++		}
++		uint32_t *line = pixels + (top + y) * width + left;
++		for (size_t x = 0; x < size[0]; x++) {
++			line[x] = row[x] | 0xff000000;
++		}
++	}
++	buffer = &buffer_create_from_data(pixels, width, height, width * 4)->base;
++	pixels = NULL; /* the buffer's now */
++out:
++	free(row);
++	free(pixels);
++	close(fd);
++	return buffer;
++}
++
+ static void
+ startup_cover_create(struct output *output)
+ {
+@@ -719,9 +783,16 @@ startup_cover_create(struct output *output)
+ 		return;
+ 	}
+ 	struct wlr_buffer *frame = handover_load(output);
++	if (!frame) {
++		frame = startup_picture_load(output);
++		output->startup_frame_is_picture = frame != NULL;
++	}
+ 	if (frame) {
+ 		output->startup_frame = wlr_scene_buffer_create(&server.scene->tree, frame);
+ 		wlr_buffer_drop(frame);
++		if (output->startup_frame) {
++			output->startup_frame->point_accepts_input = rotation_accepts_input;
++		}
+ 	}
+ 	if (!output->startup_frame && rc.startup_fade) {
+ 		float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+@@ -752,6 +823,7 @@ startup_cover_destroy(struct output *output)
+ 		wlr_scene_node_destroy(&output->startup_frame->node);
+ 		output->startup_frame = NULL;
+ 	}
++	output->startup_frame_is_picture = false;
+ }
+ 
+ static bool
+@@ -778,7 +850,21 @@ startup_tick(struct output *output)
+ 	} else {
+ 		wlr_scene_rect_set_size(output->startup_cover, box.width, box.height);
+ 	}
+-	wlr_scene_node_place_below(cover, &output->session_lock_tree->node);
++	if (output->startup_frame_is_picture) {
++		/*
++		 * A session that starts locked takes the lock before its lock
++		 * screen has drawn, and the lock's black background would hide
++		 * the splash until then: the boot picture lies over the lock
++		 * too. It holds nothing of a session and takes no input, and
++		 * an almost-opaque cover keeps the lock surface drawing.
++		 */
++		wlr_scene_node_place_above(cover, &output->session_lock_tree->node);
++		if (!output->startup_fade_began) {
++			wlr_scene_buffer_set_opacity(output->startup_frame, 0.999f);
++		}
++	} else {
++		wlr_scene_node_place_below(cover, &output->session_lock_tree->node);
++	}
+ 
+ 	/* A desktop shell: wallpaper and bar. A greeter: one layer over everything. */
+ 	bool background = false, bar = false, covering = false;
+@@ -816,7 +902,9 @@ startup_tick(struct output *output)
+ 			? now - output->startup_ready_since : 0;
+ 		bool ready = drawn && ready_for >= STARTUP_QUIET_SECONDS
+ 			&& (covering || bar || ready_for >= STARTUP_BAR_WAIT_SECONDS);
+-		if (ready || now - output->startup_began >= STARTUP_TIMEOUT_SECONDS) {
++		double timeout = output->startup_frame_is_picture
++			? STARTUP_PICTURE_TIMEOUT_SECONDS : STARTUP_TIMEOUT_SECONDS;
++		if (ready || now - output->startup_began >= timeout) {
+ 			wlr_log(WLR_INFO, "startup cover: %s after %.0f ms (background %d, bar %d, frame %d)",
+ 				ready ? "ready" : "timeout",
+ 				(now - output->startup_began) * 1000, background, bar,
