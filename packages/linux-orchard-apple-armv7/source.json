@@ -1,6 +1,6 @@
 {
   "repository": "OrchardLinux/orchard",
-  "orchard": "0.3.3",
+  "orchard": "0.3.6",
   "asset": "platform-apple-armv7.tar.gz",
   "sha256": "60e170d5f5d72bde264abb7b7d86af4170fc53b836e9641a8147258aee7efd0f",
   "sha512": "c3c096574d6fe30d2febf32e5695c1cac9a5b47db02ed5b1d0c026e820728978d23d761785cd9a0d2b629a4a5526e7203d3683f2cd380eb7e7a304e39f993e82"

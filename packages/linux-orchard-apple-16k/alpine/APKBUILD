@@ -5,7 +5,7 @@
 # checksum (`tools/pkgrepo orchard-release VERSION` writes both).
 pkgname=linux-orchard-apple-16k
 _platform=apple-16k
-pkgver=0.3.3
+pkgver=0.3.6
 pkgrel=0
 pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple A9 and later (16 KiB pages)"
 url="https://github.com/OrchardLinux/orchard"
@@ -28,5 +28,5 @@ package() {
 }
 
 sha512sums="
-15e500346f958bc42b518f991be411e84789e53aa3a78a6e1c3a05aef4de01bdd624487884fd2e7740adc94dfb6aa0fa74e433444befcb8e265ec99102010468  platform-$_platform-$pkgver.tar.gz
+5fd3def66d1e6138f5130d237536d0a71b7fda8df4ac177c26de45f78db1b8203b0ef1047d9da424d604fe22b92981698c58e67230ceb6f69ab39b507394d878  platform-$_platform-$pkgver.tar.gz
 "
