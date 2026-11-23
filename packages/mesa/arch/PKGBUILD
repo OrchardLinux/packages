@@ -25,11 +25,11 @@
 # archive's checksum when OrchardLinux/mesa moves (see ../source.json).
 
 pkgname=mesa
-_commit=60645432fe8944a1c8e249ea9a5f0fb12edc48d5
+_commit=1c4e55e5f36efe07dd063d9704067cfab11a33f6
 epoch=1
 # Mesa's version, the commit's number on the fork's main branch (so that a
 # newer commit is a newer package), and the commit.
-pkgver=27.0.0.3
+pkgver=27.0.0.4
 pkgrel=1
 pkgdesc="Mesa from the OrchardLinux fork: OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and the desktop's GPU probe"
 url="https://github.com/OrchardLinux/mesa"
@@ -50,7 +50,7 @@ provides=("mesa-libgl=${epoch}:${pkgver}-${pkgrel}" 'opengl-driver' 'vulkan-driv
 conflicts=('mesa-libgl' 'mesa-orchard' 'vulkan-powervr' 'vulkan-powervr-orchard')
 replaces=('mesa-orchard' 'vulkan-powervr-orchard')
 source=("mesa-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz" gpu-probe.c)
-sha256sums=('afd7ffe55150083635b538865f9ceab4ae068ec638a36b046ce4486e72b4b246'
+sha256sums=('3cd0a985ee428de98eadd6ae6e1d6fefa0df4ca0ebd58aaedc34a7778f26af30'
             '8b6622bdd9bba6f8bdcc7bf407e98078517e8823a7ce22416774ca88481864f2')
 
 build() {
