@@ -1,7 +1,7 @@
 {
   "repository": "OrchardLinux/orchard",
-  "orchard": "0.3.2",
+  "orchard": "0.3.3",
   "asset": "platform-apple-4k.tar.gz",
-  "sha256": "a2a2b43f516599ceac842cecd3f353ef5b18ec6cf449c05272d55cb46112af76",
-  "sha512": "d2401680925c648484956ebb7eeeb2a6ea28366469cd1eb918478ffeb32f5b28ee4cbcc134d8d8f3f0039d44e9caa66655890b796c000e4af5ce60e5ca393ac8"
+  "sha256": "aa5b203861d908ad4e9318b0570ec7cab88e8d1b0c9f2bd39cd9496d3868a0c0",
+  "sha512": "9bd4b015a6b5cef9a425105761362319d6761faa2082d1372dcab298f27aa120240302bde9a522119996fb514bc2d81fe3dffe9e2a787d5da1e8d28187db6660"
 }

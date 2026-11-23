@@ -6,7 +6,7 @@
 
 pkgname=linux-orchard-apple-armv7
 _platform=apple-armv7
-pkgver=0.3.2
+pkgver=0.3.3
 pkgrel=1
 pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple 32-bit SoCs (A5 to A6X)"
 arch=('armv7h')
@@ -20,7 +20,7 @@ source=("platform-${_platform}-${pkgver}.tar.gz::${url}/releases/download/v${pkg
         '05-orchard-boot-entries-save.hook'
         '95-orchard-boot-entries.hook')
 noextract=("platform-${_platform}-${pkgver}.tar.gz")
-sha256sums=('60f6e8798b8c003db793c33c7e5a2b89184dea2d0f98277bb584e6b94685c4ae'
+sha256sums=('60e170d5f5d72bde264abb7b7d86af4170fc53b836e9641a8147258aee7efd0f'
             'e8933219691a50afe1d6943fae2df044a2c2fc3017b507f1a4e704cf0842615b'
             'fcc8693f613532d57e20f01512413b5572498af863b794750b4dd6fcff28ca2c')
 

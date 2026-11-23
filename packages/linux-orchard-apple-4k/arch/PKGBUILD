@@ -6,7 +6,7 @@
 
 pkgname=linux-orchard-apple-4k
 _platform=apple-4k
-pkgver=0.3.2
+pkgver=0.3.3
 pkgrel=1
 pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple A7, A8 and A8X"
 arch=('aarch64')
@@ -20,7 +20,7 @@ source=("platform-${_platform}-${pkgver}.tar.gz::${url}/releases/download/v${pkg
         '05-orchard-boot-entries-save.hook'
         '95-orchard-boot-entries.hook')
 noextract=("platform-${_platform}-${pkgver}.tar.gz")
-sha256sums=('a2a2b43f516599ceac842cecd3f353ef5b18ec6cf449c05272d55cb46112af76'
+sha256sums=('aa5b203861d908ad4e9318b0570ec7cab88e8d1b0c9f2bd39cd9496d3868a0c0'
             'e8933219691a50afe1d6943fae2df044a2c2fc3017b507f1a4e704cf0842615b'
             'fcc8693f613532d57e20f01512413b5572498af863b794750b4dd6fcff28ca2c')
 
