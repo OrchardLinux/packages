@@ -1,9 +1,9 @@
 {
   "repository": "OrchardLinux/omarchy-a",
-  "tag": "v0.3.2",
-  "version": "0.3.2",
-  "commit": "0d72bf4ae8e4512087992ab31fcf072e96733d1d",
-  "url": "https://github.com/OrchardLinux/omarchy-a/archive/0d72bf4ae8e4512087992ab31fcf072e96733d1d.tar.gz",
-  "sha256": "87b9ca0d5b552683e6e288b51c1f2936b9c6769210ef8e74352611d169477448",
+  "tag": "v0.3.3",
+  "version": "0.3.3",
+  "commit": "17e0e6776bd7561f6a0ccf8421f5a5ec8bc25249",
+  "url": "https://github.com/OrchardLinux/omarchy-a/archive/17e0e6776bd7561f6a0ccf8421f5a5ec8bc25249.tar.gz",
+  "sha256": "6b4c846743e9cf6a17a82ae6b78cb5b7ad6dd5893cdfe54bfd0e34ecb63b8203",
   "track": "releases"
 }
