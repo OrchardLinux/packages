@@ -17,8 +17,8 @@
 # versions is omarchy-a's /usr/lib/omarchy-a/package-install.
 
 pkgname=omarchy-a
-pkgver=0.3.4
-pkgrel=2
+pkgver=0.3.5
+pkgrel=1
 pkgdesc='Omarchy A: the touch desktop for Apple A-chip devices, its configuration and system defaults'
 arch=('aarch64' 'armv7h')
 url='https://github.com/OrchardLinux/omarchy-a'
@@ -89,7 +89,7 @@ makedepends=(gcc make pkgconf patch wayland libxkbcommon pango cairo)
 # Upstream Omarchy's package has the same tree (/usr/share/omarchy).
 conflicts=(omarchy)
 install=omarchy-a.install
-_commit=5034956760978ebd661e378ad53343d19416ceea
+_commit=0b9050979096d518db4286bd42c30ae8a2c77367
 _omarchy=e6aec9716dbb8748e0d4e66ff927cb7b04a2e17a
 source=("omarchy-a-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz"
         "wvkbd-0.20.tar.gz::https://git.sr.ht/~proycon/wvkbd/archive/v0.20.tar.gz"
@@ -97,7 +97,7 @@ source=("omarchy-a-${_commit}.tar.gz::${url}/archive/${_commit}.tar.gz"
         "https://files.pythonhosted.org/packages/d2/fc/c0a3f4c4eaa5a22fbef91713474666e13d0ea2a69c84532579490a9f2cc8/dbus_next-0.2.3-py3-none-any.whl"
         "omarchy-${_omarchy}.tar.gz::https://github.com/omacom/omarchy/archive/${_omarchy}.tar.gz")
 # The first is omarchy-a's release (tools/pkgrepo bump writes it).
-sha256sums=('5c71f595efe238c980d45ba4238949e0d5341a72106a43c7b91286adbd2a6f5a'
+sha256sums=('5678a58543ad8a01d10c05f1d0d30e50e1ae3ac7c9a5c7c041d2a3e558c238a5'
             '330e7d41e2ccf3f984af701c0d055d919cff66710dfe05ce9d77e4ae6e1adc16'
             'da91786d828b6a6e29b884bc510473939eda052658ebef87d7bdeafa6a8746f9'
             '58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b'
