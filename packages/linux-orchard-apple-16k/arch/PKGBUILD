@@ -6,7 +6,7 @@
 
 pkgname=linux-orchard-apple-16k
 _platform=apple-16k
-pkgver=0.3.6
+pkgver=0.3.7
 pkgrel=1
 pkgdesc="orchard's Linux kernel, modules, device trees and initrd for Apple A9 and later (16 KiB pages)"
 arch=('aarch64')
@@ -20,7 +20,7 @@ source=("platform-${_platform}-${pkgver}.tar.gz::${url}/releases/download/v${pkg
         '05-orchard-boot-entries-save.hook'
         '95-orchard-boot-entries.hook')
 noextract=("platform-${_platform}-${pkgver}.tar.gz")
-sha256sums=('a18fd3edad9710a037f0510cc171167ca00159d00da35e496beef61fe8540ffb'
+sha256sums=('1246612c94038f620b5f06d84cd53cf018a98b6c844f8a00b157caed21e62f57'
             'e8933219691a50afe1d6943fae2df044a2c2fc3017b507f1a4e704cf0842615b'
             'fcc8693f613532d57e20f01512413b5572498af863b794750b4dd6fcff28ca2c')
 
