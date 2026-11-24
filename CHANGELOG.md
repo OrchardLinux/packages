@@ -10,6 +10,15 @@ under the package and the version it builds (`epoch:pkgver-pkgrel`). A push
 to `main` publishes every changed version at once, so when merging, rename
 **Unreleased** to that day's date (`## 2026-11-20`).
 
+## 2026-11-24
+
+### omarchy-a 0.3.4-2
+
+- The "Volume was not properly unmounted ... Please run fsck" message at
+  boot goes away: the system now checks the boot partition at start and
+  clears what an unclean shutdown left behind, from the next start after
+  the update on.
+
 ## 2026-11-22
 
 ### labwc 1:0.20.2-8

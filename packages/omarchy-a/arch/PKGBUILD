@@ -18,7 +18,7 @@
 
 pkgname=omarchy-a
 pkgver=0.3.4
-pkgrel=1
+pkgrel=2
 pkgdesc='Omarchy A: the touch desktop for Apple A-chip devices, its configuration and system defaults'
 arch=('aarch64' 'armv7h')
 url='https://github.com/OrchardLinux/omarchy-a'
@@ -59,6 +59,8 @@ depends=(
   bluez-utils
   upower
   zram-generator
+  # fsck.fat: the boot check of /boot (fstab pass 2) clears its FAT dirty bit.
+  dosfstools
   grim
   wlr-randr
   # Device orientation from the accelerometer.
