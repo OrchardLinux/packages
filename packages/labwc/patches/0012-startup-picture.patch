@@ -52,7 +52,7 @@ index 7e6cc48..9e4a7e7 100644
  #define STARTUP_BAR_WAIT_SECONDS 0.6
  #define STARTUP_TIMEOUT_SECONDS 6.0
 +/* The boot picture waits for a whole shell and its lock to start. */
-+#define STARTUP_PICTURE_TIMEOUT_SECONDS 20.0
++#define STARTUP_PICTURE_TIMEOUT_SECONDS 60.0
 +#define STARTUP_PICTURE_MAGIC "OSPL"
  #define HANDOVER_MAX_AGE_SECONDS 20
  #define HANDOVER_MAGIC "LABFRAM1"

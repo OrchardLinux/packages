@@ -10,6 +10,13 @@ under the package and the version it builds (`epoch:pkgver-pkgrel`). A push
 to `main` publishes every changed version at once, so when merging, rename
 **Unreleased** to that day's date (`## 2026-11-20`).
 
+## Unreleased
+
+### labwc 1:0.20.2-10
+
+- At boot the splash waits up to 60 seconds for the PIN screen instead of 20.
+  After a slow start it no longer goes black before the PIN screen appears.
+
 ## 2026-11-24
 
 ### omarchy-a 0.3.4-2
