@@ -12,6 +12,13 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## Unreleased
 
+### labwc 1:0.20.2-11
+
+- A swipe up from the bottom edge can open the overview under the finger,
+  and the launcher when swiped on past half the screen (Omarchy A turns
+  this on). Without the GPU desktop the overview now fades in with the
+  finger, for four fingers too, instead of after it.
+
 ### qt6-base: Arch's again
 
 - `[orchard]` no longer carries its own `qt6-base`: Arch's Qt 6.12.1 has the
