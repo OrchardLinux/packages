@@ -86,7 +86,8 @@ See the README for the whole pacman.conf entry."
   python3 "$repo/tools/pkgrepo" record --base arch "$work/new/built.json" "${names[@]}"
 
   shopt -s nullglob
-  gh release upload "$tag" --clobber "$work"/new/*.pkg.tar.zst "$work"/new/*.pkg.tar.zst.sig
+  uploads=("$work"/new/*.pkg.tar.zst "$work"/new/*.pkg.tar.zst.sig)
+  (( ! ${#uploads[@]} )) || gh release upload "$tag" --clobber "${uploads[@]}"
   # The index under the names pacman asks for.
   mkdir "$work/index"
   cp "$work/new/orchard.db.tar.gz" "$work/index/orchard.db"
