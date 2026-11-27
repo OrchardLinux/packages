@@ -19,7 +19,7 @@ int main(void)
     bottom_swipe_begin(&s, portrait, 300, 1020, 100, true);
     assert(bottom_swipe_motion(&s, portrait, 340, 1010, 150, true) == BOTTOM_PASS);
     bottom_swipe_begin(&s, portrait, 300, 1020, 100, true);
-    assert(bottom_swipe_motion(&s, portrait, 300, 970, 801, true) == BOTTOM_PASS);
+    assert(bottom_swipe_motion(&s, portrait, 300, 970, 1601, true) == BOTTOM_PASS);
     bottom_swipe_begin(&s, portrait, 300, 1020, 100, true);
     assert(bottom_swipe_motion(&s, portrait, 300, 975, 200, false) == BOTTOM_CANCEL);
     bottom_swipe_begin(&s, portrait, 300, 1020, 100, true);
