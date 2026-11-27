@@ -12,6 +12,14 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## Unreleased
 
+### qt6-base: Arch's again
+
+- `[orchard]` no longer carries its own `qt6-base`: Arch's Qt 6.12.1 has the
+  on-screen keyboard fix it was carrying. Our 6.12.0 held tablets back while
+  Arch's other Qt modules moved to 6.12.1, and after an update the desktop
+  stayed black. The next `omarchy-update` (or `pacman -Syu`) moves `qt6-base`
+  to Arch's 6.12.1. Reported by ricktav (thanks!), packages#15.
+
 ### labwc 1:0.20.2-10
 
 - At boot the splash waits up to 60 seconds for the PIN screen instead of 20.

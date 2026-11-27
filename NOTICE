@@ -17,12 +17,6 @@ packages/labwc: Labwc, GPL-2.0-only.
   omarchy-a's desktop/build-labwc (Henrik Klee; ARMv7 by Shayne Legault).
   patches/0001 to 0004: Henrik Klee.
   patches/0005: Berkay Kösebay (omarchy-a PR #46).
-packages/qt6-base: Qt Base, LGPL-3.0-only / GPL-3.0-only (with exceptions), licenses in the package;
-  source https://github.com/qt/qtbase, tag v6.12.0.
-  Recipe and arch/qt6-base-*.patch: Arch Linux ARM's extra/qt6-base (archlinuxarm/PKGBUILDs 1117e0aaa6;
-  Maintainers: Antonio Rojas, Felix Yan; ALARM: Kevin Mihelich, John), adapted by Henrik Klee.
-  patches/0001: Inho Lee (Qt commit e26d5a8eee, as picked to 6.12: dc41c4eed4).
-  patches/0002: David Edmundson (Qt commit b4dd527686, as picked to 6.12: 45df0ed09d).
 packages/libva-v4l2-request: libva-v4l2_request, GPL-3.0-only; Ondrej Jirman and contributors,
   https://xff.cz/git/libva-v4l2_request. The archive beside the recipe is that repository's tree at
   commit cac6ece0e23ac1f944dd3af266680aff0c3184df (git archive); COPYING is in it and in the package.

@@ -26,8 +26,16 @@ for arch in aarch64 armv7h; do
   shopt -s nullglob
   packages=("$artifacts"/package-arch-"$arch"-*/*.pkg.tar.zst)
   shopt -u nullglob
-  (( ${#packages[@]} )) || continue
   tag=repo-$arch
+  # Packages whose recipe is gone leave the index (tools/pkgrepo dropped).
+  drop=()
+  if gh release view "$tag" >/dev/null 2>&1; then
+    probe=$(mktemp -d)
+    gh release download "$tag" --pattern orchard.db --dir "$probe" 2>/dev/null || true
+    mapfile -t drop < <(python3 "$repo/tools/pkgrepo" dropped --base arch "$probe/orchard.db")
+    rm -rf "$probe"
+  fi
+  (( ${#packages[@]} + ${#drop[@]} )) || continue
   if ! gh release view "$tag" >/dev/null 2>&1; then
     gh release create "$tag" --latest=false --title "Package repository: $arch" --notes \
 "The pacman repository \`orchard\` for $arch. Not a release to download by hand: pacman reads it.
@@ -45,13 +53,14 @@ See the README for the whole pacman.conf entry."
   [[ ! -f $work/old/orchard.db ]] || cp "$work/old/orchard.db" "$work/new/orchard.db.tar.gz"
   [[ ! -f $work/old/orchard.files ]] || cp "$work/old/orchard.files" "$work/new/orchard.files.tar.gz"
   [[ ! -f $work/old/built.json ]] || cp "$work/old/built.json" "$work/new/built.json"
-  cp "${packages[@]}" "$work/new/"
+  (( ! ${#packages[@]} )) || cp "${packages[@]}" "$work/new/"
   # The artifact's directory names the package (ci/container-build checked it).
   names=()
   for package in "${packages[@]}"; do
     directory=$(basename "$(dirname "$package")")
     names+=("${directory#package-arch-"$arch"-}")
   done
+  printf '%s\n' "${drop[@]}" > "$work/new/.drop"
 
   sign=()
   if [[ -n ${ORCHARD_SIGNING_KEY:-} ]]; then
@@ -68,7 +77,10 @@ See the README for the whole pacman.conf entry."
       rm .signing-key
       for package in "${packages[@]}"; do gpg --batch --yes --detach-sign --no-armor "$package"; done
     fi
-    repo-add "$@" orchard.db.tar.gz "${packages[@]}"
+    mapfile -t drop < <(grep . .drop || true)
+    rm .drop
+    (( ! ${#drop[@]} )) || repo-remove "$@" orchard.db.tar.gz "${drop[@]}"
+    (( ! ${#packages[@]} )) || repo-add "$@" orchard.db.tar.gz "${packages[@]}"
   ' repo-add "${sign[@]}"
   sudo chown -R "$(id -u):$(id -g)" "$work/new"
   python3 "$repo/tools/pkgrepo" record --base arch "$work/new/built.json" "${names[@]}"
@@ -92,7 +104,7 @@ See the README for the whole pacman.conf entry."
   for asset in "${stale[@]}"; do
     gh release delete-asset "$tag" "$asset" --yes
   done
-  echo "Published to $tag: ${names[*]}"
+  echo "Published to $tag: ${names[*]}${drop[*]:+; removed: ${drop[*]}}"
   rm -rf "$work"
 done
 

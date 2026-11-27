@@ -50,7 +50,7 @@ REPOSITORY = os.environ.get('GITHUB_REPOSITORY', 'OrchardLinux/packages')
 CCACHE = {'mesa'}
 # Minutes a build job may take: Qt's base compiles for hours on the 4-core runners.
 TIMEOUT = 90
-TIMEOUTS = {'qt6-base': 300}
+TIMEOUTS = {}
 ORCHARD = 'OrchardLinux/orchard'
 
 
@@ -211,7 +211,7 @@ def state(arch, base='arch'):
 
 def plan(args):
     check()
-    builds, changed = [], []
+    builds, changed, drops = [], [], []
     for base, row in BASES.items():
         for arch in row['arches']:
             wanted = [name for name in names(base) if not args.package or name == args.package]
@@ -231,11 +231,16 @@ def plan(args):
                     changed.append(f'{name} ({where})')
                 else:
                     print(f'current {where:15} {name} {built["version"]}', file=sys.stderr)
+            if not args.package:
+                for name in sorted(set(index) - set(names(base))):
+                    drops.append({'package': name, 'base': base, 'arch': arch})
+                    print(f'drop    {where:15} {name} {index[name]} (no recipe any more)', file=sys.stderr)
     if changed:
         fail('recipe, patches or pin changed but the version is already published: ' + ', '.join(changed) +
              '. Raise pkgrel (tools/pkgrepo rebuild NAME).')
-    targets = sorted({(b['base'], b['arch']) for b in builds})
+    targets = sorted({(b['base'], b['arch']) for b in builds + drops})
     result = {'matrix': json.dumps({'include': builds}), 'any': 'true' if builds else 'false',
+              'publish': 'true' if builds or drops else 'false',
               'targets': json.dumps([{'base': base, 'arch': arch} for base, arch in targets])}
     lines = ''.join(f'{key}={value}\n' for key, value in result.items())
     output = os.environ.get('GITHUB_OUTPUT')
@@ -312,6 +317,8 @@ def record(args):
     recorded = json.loads(path.read_text()) if path.is_file() else {}
     for name in args.names:
         recorded[name] = {'version': recipe(name, args.base)['version'], 'recipe': recipe_digest(name, args.base)}
+    for name in set(recorded) - set(names(args.base)):
+        del recorded[name]
     path.write_text(json.dumps(recorded, indent=2, sort_keys=True) + '\n')
 
 
@@ -455,6 +462,14 @@ def prune(args):
             print(asset)
 
 
+def dropped(args):
+    """The packages an index names that have no recipe for its base any more: publish removes them."""
+    index = Path(args.index)
+    if index.is_file():
+        for name in sorted(set(entries(index.read_bytes(), args.base)) - set(names(args.base))):
+            print(name)
+
+
 def files(args):
     for _, filename in sorted(entries(Path(args.index).read_bytes(), args.base).values()):
         print(filename)
@@ -515,7 +530,7 @@ def main():
     sub = commands.add_parser('record')
     sub.add_argument('--base', choices=sorted(BASES), default='arch')
     sub.add_argument('state')
-    sub.add_argument('names', nargs='+')
+    sub.add_argument('names', nargs='*')
     sub.set_defaults(run=record)
     sub = commands.add_parser('bump')
     sub.add_argument('--repository')
@@ -532,6 +547,10 @@ def main():
     sub.add_argument('--index', nargs='+', required=True)
     sub.add_argument('--assets', nargs='*', default=[])
     sub.set_defaults(run=prune)
+    sub = commands.add_parser('dropped')
+    sub.add_argument('--base', choices=sorted(BASES), default='arch')
+    sub.add_argument('index')
+    sub.set_defaults(run=dropped)
     sub = commands.add_parser('files')
     sub.add_argument('--base', choices=sorted(BASES), default='arch')
     sub.add_argument('index')

@@ -39,14 +39,6 @@ class Recipes(unittest.TestCase):
         for name in ('mesa', 'labwc', 'wlroots0.20'):
             self.assertTrue(pkgrepo.recipe(name)['version'].startswith('1:'), name)
 
-    def test_qt6_base_ranks_just_above_arch_without_an_epoch(self):
-        # It is dropped once Arch's Qt has the fix; an epoch would hold tablets on it after that.
-        version = pkgrepo.recipe('qt6-base')['version']
-        self.assertNotIn(':', version)
-        self.assertGreater(pkgrepo.vercmp(version, '6.12.0-5'), 0)
-        self.assertLess(pkgrepo.vercmp(version, '6.12.0-6'), 0)
-        self.assertNotIn('track', pkgrepo.pin('qt6-base'))
-
     def test_architectures(self):
         self.assertEqual(pkgrepo.recipe('mesa')['arch'], ['aarch64'])
         self.assertEqual(pkgrepo.recipe('omacalc')['arch'], ['armv7h'])
@@ -166,10 +158,29 @@ class Plan(unittest.TestCase):
         self.assertLessEqual({('omarchy-a', 'aarch64'), ('omarchy-a', 'armv7h')}, builds)
 
     def test_a_long_build_gets_more_time(self):
-        builds = pkgrepo.json.loads(self.plan({})['matrix'])['include']
+        with mock.patch.dict(pkgrepo.TIMEOUTS, {'mesa': 300}):
+            builds = pkgrepo.json.loads(self.plan({})['matrix'])['include']
         timeouts = {b['package']: b['timeout'] for b in builds}
         self.assertEqual(timeouts['labwc'], 90)
-        self.assertGreater(timeouts['qt6-base'], 90)
+        self.assertEqual(timeouts['mesa'], 300)
+
+    def test_a_package_without_a_recipe_is_dropped_from_the_index(self):
+        published = self.everything()
+        published[('arch', 'aarch64')]['qt6-base'] = '6.12.0-5.1'
+        result = self.plan(published)
+        self.assertEqual(result['any'], 'false')
+        self.assertEqual(result['publish'], 'true')
+        self.assertEqual(pkgrepo.json.loads(result['targets']), [{'base': 'arch', 'arch': 'aarch64'}])
+
+    def test_dropped_lists_index_names_without_a_recipe(self):
+        index = {'labwc': ('1:0.20.2-10', 'labwc.pkg.tar.zst'), 'qt6-base': ('6.12.0-5.1', 'qt6-base.pkg.tar.zst')}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(pkgrepo, 'entries', lambda data, base='arch': index), \
+                mock.patch('sys.stdout', io.StringIO()) as out:
+            path = pkgrepo.Path(tmp) / 'orchard.db'
+            path.write_bytes(b'')
+            pkgrepo.dropped(mock.Mock(index=str(path), base='arch'))
+        self.assertEqual(out.getvalue(), 'qt6-base\n')
 
     def test_nothing_builds_when_every_version_is_published(self):
         result = self.plan(self.everything())

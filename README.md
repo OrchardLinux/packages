@@ -22,7 +22,6 @@ built for both.
 | `mesa` | yes | - | Mesa from [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa): OpenGL through Zink or in software, the Vulkan driver for the Apple PowerVR GPUs, and `gpu-probe`. Pinned to a commit of the fork's `main` until the fork tags its first release; then it follows releases. Replaces Arch's `mesa`. |
 | `wlroots0.20` | yes | yes | Arch's wlroots 0.20 with fast rotated software compositing and a GLES2 renderer that reads shared-memory buffers in place. Replaces Arch's `wlroots0.20`. |
 | `labwc` | yes | yes | Labwc with the tablet patches: touch input fixes, bottom-edge swipe, session transitions, the overview. Replaces Arch's `labwc`. |
-| `qt6-base` | yes | yes | Arch Linux ARM's qt6-base 6.12.0 with Qt's text-input focus fix (QTBUG-146211) from its 6.12 branch: the on-screen keyboard closes when focus leaves a text field in a Qt app. Replaces Arch's `qt6-base` until Arch ships a Qt with the fix. |
 | `libva-v4l2-request` | yes | - | VA-API on orchard's hardware video decoders. |
 | `omactivity` | yes | yes | The touch task manager, from [OrchardLinux/omactivity](https://github.com/OrchardLinux/omactivity). Follows its releases (the published pin is newer than v0.1.0; its next release moves it). |
 | `folio-touch` | yes | yes | Files: Folio with touch mode, from the `touch-mode` branch of [OrchardLinux/folio](https://github.com/OrchardLinux/folio), pinned to a commit until the fork tags a release newer than 0.4.0 (`v0.4.1`; its tag `a0.2.0-1` is no version tag). Provides `folio` and conflicts with upstream Omarchy's. |
@@ -36,9 +35,8 @@ Packages that replace an Arch package keep Arch's name and carry epoch 1. pacman
 takes a package from the first repository that lists it, so with `[orchard]`
 first, `pacman -S labwc` and `pacman -Syu` install ours, and a system that
 still has Arch's build moves to ours on its next update.
-`qt6-base` is the exception: it carries a fix until Arch's Qt has it, so it
-ranks above Arch's build by its pkgrel (`6.12.0-5.1`) instead, and tablets go
-back to Arch's next build by the ordinary update once it is dropped.
+A package whose recipe is removed leaves the repository at the next publish,
+and tablets go back to Arch's build by the ordinary update.
 
 ## Using the repository
 

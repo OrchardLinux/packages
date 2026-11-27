@@ -22,6 +22,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       any: ${{ steps.plan.outputs.any }}
+      publish: ${{ steps.plan.outputs.publish }}
       targets: ${{ steps.plan.outputs.targets }}
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +83,7 @@ jobs:
   publish:
     # What built is published even when another package failed.
     needs: [plan, build]
-    if: ${{ !cancelled() && needs.plan.outputs.any == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && needs.plan.outputs.publish == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
@@ -98,6 +99,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.any == 'true'
         with:
           pattern: package-*
           path: artifacts
@@ -107,10 +109,11 @@ jobs:
           # Not set yet: the repository is unsigned until the key exists (docs/signing.md).
           ORCHARD_SIGNING_KEY: ${{ secrets.ORCHARD_SIGNING_KEY }}
           ORCHARD_APK_KEY: ${{ secrets.ORCHARD_APK_KEY }}
+          DROPS: ${{ needs.plan.outputs.any != 'true' && 'true' || 'false' }}
         run: |
           mkdir -p artifacts
           ci/publish artifacts
-          if [[ -n $(find artifacts \( -name '*.pkg.tar.*' -o -name '*.apk' \) -print -quit) ]]; then
+          if [[ -n $(find artifacts \( -name '*.pkg.tar.*' -o -name '*.apk' \) -print -quit) || $DROPS == true ]]; then
             echo published=true >> "$GITHUB_OUTPUT"
           fi
   verify:
