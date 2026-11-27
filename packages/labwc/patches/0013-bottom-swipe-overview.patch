@@ -1,0 +1,257 @@
+diff --git a/include/config/touch.h b/include/config/touch.h
+index 660d29d..d49197b 100644
+--- a/include/config/touch.h
++++ b/include/config/touch.h
+@@ -11,6 +11,10 @@ struct touch_config_entry {
+ 	bool force_mouse_emulation;
+ 	char *bottom_swipe_command;
+ 	char *bottom_swipe_ignore_namespace;
++	/* The swipe opens the overview, following the finger; going on past
++	 * half the screen runs bottom_swipe_far_command instead. */
++	bool bottom_swipe_overview;
++	char *bottom_swipe_far_command;
+ 
+ 	struct wl_list link;     /* struct rcxml.touch_configs */
+ };
+diff --git a/include/overview.h b/include/overview.h
+index bc46628..89af58b 100644
+--- a/include/overview.h
++++ b/include/overview.h
+@@ -62,5 +62,7 @@ void overview_scroll(double delta);
+ bool overview_gesture_begin(struct output *output, bool towards_overview);
+ void overview_gesture_update(double travel, uint32_t time_msec);
+ void overview_gesture_end(void);
++/* Let go, back to the desktop whatever the fingers did (something else opens). */
++void overview_gesture_end_closed(void);
+ 
+ #endif /* LABWC_OVERVIEW_H */
+diff --git a/src/config/rcxml.c b/src/config/rcxml.c
+index d3eff09..ff9d98a 100644
+--- a/src/config/rcxml.c
++++ b/src/config/rcxml.c
+@@ -676,6 +676,10 @@ fill_touch(xmlNode *node)
+ 			xstrdup_replace(touch_config->bottom_swipe_command, content);
+ 		} else if (!strcasecmp(key, "bottomSwipeIgnoreNamespace")) {
+ 			xstrdup_replace(touch_config->bottom_swipe_ignore_namespace, content);
++		} else if (!strcasecmp(key, "bottomSwipeOverview")) {
++			set_bool(content, &touch_config->bottom_swipe_overview);
++		} else if (!strcasecmp(key, "bottomSwipeFarCommand")) {
++			xstrdup_replace(touch_config->bottom_swipe_far_command, content);
+ 		} else {
+ 			wlr_log(WLR_ERROR, "Unexpected data in touch parser: %s=\"%s\"",
+ 				key, content);
+@@ -2136,6 +2140,7 @@ rcxml_finish(void)
+ 		zfree(touch_config->output_name);
+ 		zfree(touch_config->bottom_swipe_command);
+ 		zfree(touch_config->bottom_swipe_ignore_namespace);
++		zfree(touch_config->bottom_swipe_far_command);
+ 		zfree(touch_config);
+ 	}
+ 
+diff --git a/src/input/touch.c b/src/input/touch.c
+index e81450c..279c14c 100644
+--- a/src/input/touch.c
++++ b/src/input/touch.c
+@@ -63,6 +63,63 @@ static struct {
+ 	int32_t touch_id;
+ } overview_finger;
+ 
++/*
++ * One finger up from the bottom edge, once the swipe is claimed: the
++ * overview follows it. Past half the screen the overview gives way again
++ * and letting go runs the far command (the session's launcher).
++ */
++static struct {
++	bool active;
++	int32_t touch_id;
++	double start_y;   /* where the finger began, in layout coordinates */
++	double height;    /* the output's */
++	double travel;    /* how far up it is now */
++	char *far_command;
++} edge;
++
++/* Up to here the overview opens with the finger. */
++#define EDGE_RECEDE 0.45
++/* From here letting go is the far command's. */
++#define EDGE_FAR 0.5
++
++static double
++edge_overview_travel(double travel)
++{
++	double recede = edge.height * EDGE_RECEDE;
++	if (travel <= recede || !edge.far_command) {
++		return travel;
++	}
++	/* Going on, the overview goes back, three times as fast. */
++	return fmax(0, recede - (travel - recede) * 3);
++}
++
++static void
++edge_stop(bool released)
++{
++	if (!edge.active) {
++		return;
++	}
++	edge.active = false;
++	bool far = released && edge.far_command
++		&& edge.travel >= edge.height * EDGE_FAR;
++	if (far) {
++		overview_gesture_end_closed();
++		spawn_async_no_shell(edge.far_command);
++	} else if (released) {
++		overview_gesture_end();
++	} else {
++		overview_gesture_end_closed();
++	}
++	zfree(edge.far_command);
++}
++
++static void
++edge_motion(double ly, uint32_t time_msec)
++{
++	edge.travel = edge.start_y - ly;
++	overview_gesture_update(edge_overview_travel(edge.travel), time_msec);
++}
++
+ static struct wlr_surface *
+ touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
+ 		double *x_offset, double *y_offset)
+@@ -352,7 +409,20 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
+ 		lx, ly, event->time_msec, bottom_swipe_allowed(config, output));
+ 	if (result == BOTTOM_CLAIM || result == BOTTOM_CANCEL) {
+ 		cancel_touch_client(seat, point);
+-		if (result == BOTTOM_CLAIM) {
++		if (result != BOTTOM_CLAIM) {
++			return true;
++		}
++		if (config->bottom_swipe_overview && output
++				&& overview_gesture_begin(output, /*towards_overview*/ true)) {
++			edge.active = true;
++			edge.touch_id = point->touch_id;
++			edge.start_y = point->swipe.y;
++			edge.height = box.height;
++			edge.far_command = config->bottom_swipe_far_command
++				&& *config->bottom_swipe_far_command
++				? xstrdup(config->bottom_swipe_far_command) : NULL;
++			edge_motion(ly, event->time_msec);
++		} else {
+ 			spawn_async_no_shell(config->bottom_swipe_command);
+ 		}
+ 		return true;
+@@ -385,6 +455,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
+ 		if (four_fingers_motion(seat, event->time_msec)) {
+ 			return;
+ 		}
++		if (edge.active && edge.touch_id == event->touch_id) {
++			edge_motion(ly, event->time_msec);
++			return;
++		}
+ 		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
+ 			overview_motion(lx, ly, event->time_msec);
+ 			return;
+@@ -531,6 +605,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
+ 		}
+ 		/* The first of the four fingers to lift ends their gesture. */
+ 		four_fingers_stop();
++		if (edge.active && edge.touch_id == event->touch_id) {
++			edge_stop(/*released*/ true);
++		}
+ 		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
+ 			overview_finger.active = false;
+ 			overview_release(event->time_msec);
+@@ -565,6 +642,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
+ 			continue;
+ 		}
+ 		four_fingers_stop();
++		if (edge.active && edge.touch_id == event->touch_id) {
++			edge_stop(/*released*/ false);
++		}
+ 		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
+ 			overview_finger.active = false;
+ 			overview_press_cancel();
+diff --git a/src/overview.c b/src/overview.c
+index c4fc34b..f8de0fa 100644
+--- a/src/overview.c
++++ b/src/overview.c
+@@ -182,6 +182,9 @@ static struct {
+ 	struct wlr_scene_buffer *node;
+ 	struct output *output;
+ 	double began; /* 0 until its first frame: preparing must not eat the fade */
++	/* Opening under a finger: the fade follows the overview's progress
++	 * instead of the clock, and goes when the overview is fully open. */
++	bool held;
+ } cover;
+ 
+ #define CARD_MENU_HOLD_MS 450
+@@ -222,6 +225,7 @@ cover_remove(void)
+ 	}
+ 	cover.node = NULL;
+ 	cover.output = NULL;
++	cover.held = false;
+ }
+ 
+ /* Keep what @output shows now on screen, just above @above in the scene. */
+@@ -256,6 +260,17 @@ cover_tick(struct output *output, double time)
+ 	if (!cover.node || cover.output != output) {
+ 		return;
+ 	}
++	if (cover.held) {
++		if (ov.state == CLOSED || (ov.state == OPEN && ov.progress >= 1)
++				|| (server.session_lock_manager && server.session_lock_manager->locked)) {
++			cover_remove();
++		} else {
++			double p = fmin(fmax(ov.progress, 0), 1);
++			wlr_scene_buffer_set_opacity(cover.node, (float)(1 - p * p * (3 - 2 * p)));
++		}
++		wlr_output_schedule_frame(output->wlr_output);
++		return;
++	}
+ 	if (!cover.began) {
+ 		cover.began = time;
+ 	}
+@@ -2346,16 +2361,15 @@ overview_gesture_begin(struct output *output, bool towards_overview)
+ 		if (server.input_mode != LAB_INPUT_STATE_PASSTHROUGH || locked()) {
+ 			return false;
+ 		}
+-		if (!live) {
+-			/* Opens once the fingers have gone far enough. */
+-			ov.output = output;
+-			ov.gesture.pending = true;
+-			ov.gesture.towards = true;
+-			return true;
+-		}
+ 		if (!begin(output, false, TRACKING)) {
+ 			return false;
+ 		}
++		if (!live) {
++			/* The crossfade follows the fingers: the desktop's picture
++			 * on top, as clear as the overview is open. */
++			ov.progress = 0;
++			cover.held = cover.node != NULL;
++		}
+ 	} else if (!live) {
+ 		ov.gesture.pending = true;
+ 		ov.gesture.towards = false;
+@@ -2399,6 +2413,22 @@ overview_gesture_update(double travel, uint32_t time_msec)
+ 	redraw();
+ }
+ 
++void
++overview_gesture_end_closed(void)
++{
++	if (ov.gesture.pending) {
++		overview_gesture_end();
++		return;
++	}
++	if (ov.state != TRACKING) {
++		return;
++	}
++	ov.state = OPEN;
++	finish(NULL);
++	ov.last_tick = now();
++	redraw();
++}
++
+ void
+ overview_gesture_end(void)
+ {
