@@ -3,8 +3,8 @@
 
 Run by check(): test-bottom-swipe-overview.py SOURCE. Up to 45 % of the
 screen the overview follows the finger one to one; past it, with a far
-command, the overview goes back three times as fast, and without one it
-keeps following.
+command and nothing following the finger, the overview goes back three
+times as fast; with a follower or without a far command it holds.
 """
 from pathlib import Path
 import re
@@ -25,16 +25,20 @@ while depth:
     if touch[end] == '}': depth -= 1
     end += 1
 fixture = '#include <assert.h>\n#include <math.h>\n#include <stddef.h>\n' + defines + r'''
-static struct { double height; char *far_command; } edge;
+static struct { double height; char *far_command; int fd; } edge;
 ''' + touch[match.start():end] + r'''
 int main(void) {
     edge.height = 1000;
     edge.far_command = "launcher";
+    edge.fd = -1;
     assert(edge_overview_travel(100) == 100);
     assert(edge_overview_travel(450) == 450);
     assert(edge_overview_travel(500) == 300);   /* going back */
     assert(edge_overview_travel(700) == 0);     /* gone */
     assert(EDGE_FAR > EDGE_RECEDE);
+    edge.fd = 3;
+    assert(edge_overview_travel(700) == 700);   /* the launcher follows: holds still */
+    edge.fd = -1;
     edge.far_command = NULL;
     assert(edge_overview_travel(700) == 700);   /* nothing beyond: keeps following */
     return 0;
