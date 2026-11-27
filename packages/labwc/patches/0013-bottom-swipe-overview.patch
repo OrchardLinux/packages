@@ -1,8 +1,8 @@
 diff --git a/include/config/touch.h b/include/config/touch.h
-index 660d29d..d49197b 100644
+index 660d29d..1a06374 100644
 --- a/include/config/touch.h
 +++ b/include/config/touch.h
-@@ -11,6 +11,10 @@ struct touch_config_entry {
+@@ -11,6 +11,14 @@ struct touch_config_entry {
  	bool force_mouse_emulation;
  	char *bottom_swipe_command;
  	char *bottom_swipe_ignore_namespace;
@@ -10,9 +10,28 @@ index 660d29d..d49197b 100644
 +	 * half the screen runs bottom_swipe_far_command instead. */
 +	bool bottom_swipe_overview;
 +	char *bottom_swipe_far_command;
++	/* A socket (relative: in $XDG_RUNTIME_DIR) told how far the finger is
++	 * past where the overview turns back, so the far command's surface can
++	 * follow it: lines "p 0.42", then "end 1" or "end 0". */
++	char *bottom_swipe_far_socket;
  
  	struct wl_list link;     /* struct rcxml.touch_configs */
  };
+diff --git a/include/input/bottom-swipe.h b/include/input/bottom-swipe.h
+index c135afc..d14ab0f 100644
+--- a/include/input/bottom-swipe.h
++++ b/include/input/bottom-swipe.h
+@@ -38,7 +38,9 @@ bottom_swipe_motion(struct bottom_swipe *s, struct bottom_swipe_box box,
+ 		return BOTTOM_CANCEL;
+ 	}
+ 	double dx = fabs(x - s->x), dy = s->y - y;
+-	if ((uint32_t)(time - s->time) > 700 || dx > 24 || dy < -12) {
++	/* 1.5 s: the swipe now drives the overview, and a finger that
++	 * follows it may start slowly. */
++	if ((uint32_t)(time - s->time) > 1500 || dx > 24 || dy < -12) {
+ 		s->pending = false;
+ 		return BOTTOM_PASS;
+ 	}
 diff --git a/include/overview.h b/include/overview.h
 index bc46628..89af58b 100644
 --- a/include/overview.h
@@ -26,10 +45,10 @@ index bc46628..89af58b 100644
  
  #endif /* LABWC_OVERVIEW_H */
 diff --git a/src/config/rcxml.c b/src/config/rcxml.c
-index d3eff09..ff9d98a 100644
+index d3eff09..8e2d761 100644
 --- a/src/config/rcxml.c
 +++ b/src/config/rcxml.c
-@@ -676,6 +676,10 @@ fill_touch(xmlNode *node)
+@@ -676,6 +676,12 @@ fill_touch(xmlNode *node)
  			xstrdup_replace(touch_config->bottom_swipe_command, content);
  		} else if (!strcasecmp(key, "bottomSwipeIgnoreNamespace")) {
  			xstrdup_replace(touch_config->bottom_swipe_ignore_namespace, content);
@@ -37,22 +56,39 @@ index d3eff09..ff9d98a 100644
 +			set_bool(content, &touch_config->bottom_swipe_overview);
 +		} else if (!strcasecmp(key, "bottomSwipeFarCommand")) {
 +			xstrdup_replace(touch_config->bottom_swipe_far_command, content);
++		} else if (!strcasecmp(key, "bottomSwipeFarSocket")) {
++			xstrdup_replace(touch_config->bottom_swipe_far_socket, content);
  		} else {
  			wlr_log(WLR_ERROR, "Unexpected data in touch parser: %s=\"%s\"",
  				key, content);
-@@ -2136,6 +2140,7 @@ rcxml_finish(void)
+@@ -2136,6 +2142,8 @@ rcxml_finish(void)
  		zfree(touch_config->output_name);
  		zfree(touch_config->bottom_swipe_command);
  		zfree(touch_config->bottom_swipe_ignore_namespace);
 +		zfree(touch_config->bottom_swipe_far_command);
++		zfree(touch_config->bottom_swipe_far_socket);
  		zfree(touch_config);
  	}
  
 diff --git a/src/input/touch.c b/src/input/touch.c
-index e81450c..279c14c 100644
+index e81450c..d2a47a8 100644
 --- a/src/input/touch.c
 +++ b/src/input/touch.c
-@@ -63,6 +63,63 @@ static struct {
+@@ -2,6 +2,13 @@
+ #include "input/touch.h"
+ #include <math.h>
+ #include <string.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
+ #include <wayland-util.h>
+ #include <wlr/types/wlr_cursor.h>
+ #include <wlr/types/wlr_scene.h>
+@@ -63,6 +70,133 @@ static struct {
  	int32_t touch_id;
  } overview_finger;
  
@@ -68,12 +104,17 @@ index e81450c..279c14c 100644
 +	double height;    /* the output's */
 +	double travel;    /* how far up it is now */
 +	char *far_command;
-+} edge;
++	char *far_socket; /* its path, or NULL */
++	int fd;           /* connected to far_socket, or -1 */
++	double sent;      /* the last progress sent, -1 before any */
++} edge = { .fd = -1 };
 +
 +/* Up to here the overview opens with the finger. */
 +#define EDGE_RECEDE 0.45
-+/* From here letting go is the far command's. */
-+#define EDGE_FAR 0.5
++/* Here the overview has gone back entirely and the far surface is in. */
++#define EDGE_GONE (EDGE_RECEDE * 4 / 3)
++/* From here, halfway between, letting go is the far command's. */
++#define EDGE_FAR ((EDGE_RECEDE + EDGE_GONE) / 2)
 +
 +static double
 +edge_overview_travel(double travel)
@@ -86,6 +127,59 @@ index e81450c..279c14c 100644
 +	return fmax(0, recede - (travel - recede) * 3);
 +}
 +
++/* How far the far command's surface is in, 0 to 1. */
++static double
++edge_far_progress(double travel)
++{
++	double from = edge.height * EDGE_RECEDE, to = edge.height * EDGE_GONE;
++	return fmin(1, fmax(0, (travel - from) / (to - from)));
++}
++
++static void
++edge_send(const char *line)
++{
++	if (edge.fd < 0 && edge.far_socket) {
++		struct sockaddr_un addr = { .sun_family = AF_UNIX };
++		const char *dir = edge.far_socket[0] == '/' ? "" : getenv("XDG_RUNTIME_DIR");
++		if (!dir || snprintf(addr.sun_path, sizeof(addr.sun_path), "%s%s%s", dir,
++				*dir ? "/" : "", edge.far_socket) >= (int)sizeof(addr.sun_path)) {
++			return;
++		}
++		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++		if (fd < 0) {
++			return;
++		}
++		if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) {
++			close(fd);
++			/* Nobody listening: the far command alone, on letting go. */
++			zfree(edge.far_socket);
++			return;
++		}
++		edge.fd = fd;
++	}
++	if (edge.fd >= 0) {
++		/* A line the shell is too slow for is dropped; the next replaces it. */
++		ssize_t n = send(edge.fd, line, strlen(line), MSG_NOSIGNAL | MSG_DONTWAIT);
++		(void)n;
++	}
++}
++
++static void
++edge_follow(double travel)
++{
++	double p = edge_far_progress(travel);
++	if (edge.sent < 0 && p <= 0) {
++		return;
++	}
++	if (fabs(p - edge.sent) < 0.005) {
++		return;
++	}
++	char line[32];
++	snprintf(line, sizeof(line), "p %.3f\n", p);
++	edge_send(line);
++	edge.sent = p;
++}
++
 +static void
 +edge_stop(bool released)
 +{
@@ -95,8 +189,16 @@ index e81450c..279c14c 100644
 +	edge.active = false;
 +	bool far = released && edge.far_command
 +		&& edge.travel >= edge.height * EDGE_FAR;
++	if (edge.sent >= 0) {
++		edge_send(far ? "end 1\n" : "end 0\n");
++	}
++	if (edge.fd >= 0) {
++		close(edge.fd);
++		edge.fd = -1;
++	}
 +	if (far) {
 +		overview_gesture_end_closed();
++		/* Opens it when nothing followed the finger; else no change. */
 +		spawn_async_no_shell(edge.far_command);
 +	} else if (released) {
 +		overview_gesture_end();
@@ -104,6 +206,7 @@ index e81450c..279c14c 100644
 +		overview_gesture_end_closed();
 +	}
 +	zfree(edge.far_command);
++	zfree(edge.far_socket);
 +}
 +
 +static void
@@ -111,12 +214,15 @@ index e81450c..279c14c 100644
 +{
 +	edge.travel = edge.start_y - ly;
 +	overview_gesture_update(edge_overview_travel(edge.travel), time_msec);
++	if (edge.far_command) {
++		edge_follow(edge.travel);
++	}
 +}
 +
  static struct wlr_surface *
  touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
  		double *x_offset, double *y_offset)
-@@ -352,7 +409,20 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
+@@ -352,7 +486,25 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
  		lx, ly, event->time_msec, bottom_swipe_allowed(config, output));
  	if (result == BOTTOM_CLAIM || result == BOTTOM_CANCEL) {
  		cancel_touch_client(seat, point);
@@ -133,12 +239,17 @@ index e81450c..279c14c 100644
 +			edge.far_command = config->bottom_swipe_far_command
 +				&& *config->bottom_swipe_far_command
 +				? xstrdup(config->bottom_swipe_far_command) : NULL;
++			edge.far_socket = edge.far_command && config->bottom_swipe_far_socket
++				&& *config->bottom_swipe_far_socket
++				? xstrdup(config->bottom_swipe_far_socket) : NULL;
++			edge.fd = -1;
++			edge.sent = -1;
 +			edge_motion(ly, event->time_msec);
 +		} else {
  			spawn_async_no_shell(config->bottom_swipe_command);
  		}
  		return true;
-@@ -385,6 +455,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
+@@ -385,6 +537,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
  		if (four_fingers_motion(seat, event->time_msec)) {
  			return;
  		}
@@ -149,7 +260,7 @@ index e81450c..279c14c 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_motion(lx, ly, event->time_msec);
  			return;
-@@ -531,6 +605,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
+@@ -531,6 +687,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
  		}
  		/* The first of the four fingers to lift ends their gesture. */
  		four_fingers_stop();
@@ -159,7 +270,7 @@ index e81450c..279c14c 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_finger.active = false;
  			overview_release(event->time_msec);
-@@ -565,6 +642,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
+@@ -565,6 +724,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
  			continue;
  		}
  		four_fingers_stop();

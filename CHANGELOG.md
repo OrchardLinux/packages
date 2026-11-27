@@ -15,9 +15,11 @@ to `main` publishes every changed version at once, so when merging, rename
 ### labwc 1:0.20.2-11
 
 - A swipe up from the bottom edge can open the overview under the finger,
-  and the launcher when swiped on past half the screen (Omarchy A turns
-  this on). Without the GPU desktop the overview now fades in with the
-  finger, for four fingers too, instead of after it.
+  and past half the screen hand over to the launcher, which can fade in
+  with the finger (Omarchy A turns this on). Without the GPU desktop the
+  overview now fades in with the finger, for four fingers too, instead of
+  after it. A slow start no longer loses the swipe: it has 1.5 s to show
+  it means to go up, not 0.7.
 
 ### qt6-base: Arch's again
 
