@@ -12,6 +12,13 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## Unreleased
 
+### labwc 1:0.20.2-12
+
+- The bottom swipe is shorter and catches fast flicks: the overview is open
+  after a fifth of the screen and the launcher takes over from about a
+  quarter, a swipe may start a little higher off the edge, and a thumb that
+  curves sideways on the way up still counts.
+
 ### labwc 1:0.20.2-11
 
 - A swipe up from the bottom edge can open the overview under the finger,

@@ -31,16 +31,19 @@ int main(void) {
     edge.height = 1000;
     edge.far_command = "launcher";
     edge.fd = -1;
-    assert(edge_overview_travel(100) == 100);
-    assert(edge_overview_travel(450) == 450);
-    assert(edge_overview_travel(500) == 300);   /* going back */
-    assert(edge_overview_travel(700) == 0);     /* gone */
-    assert(EDGE_FAR > EDGE_RECEDE);
+#define NEAR(a, b) (fabs((a) - (b)) < 1e-6)
+    /* The overview's own gestures open it over 0.3 of the height (300). */
+    assert(NEAR(edge_overview_travel(90), 150));
+    assert(NEAR(edge_overview_travel(180), 300));  /* open at 0.18 */
+    assert(NEAR(edge_overview_travel(220), 220 * 0.3 / 0.18));
+    assert(NEAR(edge_overview_travel(250), 130 * 0.3 / 0.18));   /* going back */
+    assert(edge_overview_travel(400) == 0);     /* gone */
+    assert(EDGE_OPEN < EDGE_RECEDE && EDGE_RECEDE < EDGE_FAR && EDGE_FAR < EDGE_GONE);
     edge.fd = 3;
-    assert(edge_overview_travel(700) == 700);   /* the launcher follows: holds still */
+    assert(edge_overview_travel(400) >= 300);   /* the launcher follows: holds still */
     edge.fd = -1;
     edge.far_command = NULL;
-    assert(edge_overview_travel(700) == 700);   /* nothing beyond: keeps following */
+    assert(edge_overview_travel(400) >= 300);   /* nothing beyond: keeps following */
     return 0;
 }
 '''
