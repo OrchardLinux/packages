@@ -18,19 +18,34 @@ index 660d29d..1a06374 100644
  	struct wl_list link;     /* struct rcxml.touch_configs */
  };
 diff --git a/include/input/bottom-swipe.h b/include/input/bottom-swipe.h
-index c135afc..d14ab0f 100644
+index c135afc..3f630f7 100644
 --- a/include/input/bottom-swipe.h
 +++ b/include/input/bottom-swipe.h
-@@ -38,7 +38,9 @@ bottom_swipe_motion(struct bottom_swipe *s, struct bottom_swipe_box box,
+@@ -22,7 +22,7 @@ bottom_swipe_begin(struct bottom_swipe *s, struct bottom_swipe_box box,
+ 	*s = (struct bottom_swipe){ .x = x, .y = y, .time = time, .box = box };
+ 	s->pending = allowed && box.width > 0 && box.height > 0
+ 		&& x >= box.x && x <= box.x + box.width
+-		&& y >= box.y + box.height - 12 && y <= box.y + box.height;
++		&& y >= box.y + box.height - 20 && y <= box.y + box.height;
+ }
+ 
+ static inline enum bottom_swipe_result
+@@ -38,11 +38,14 @@ bottom_swipe_motion(struct bottom_swipe *s, struct bottom_swipe_box box,
  		return BOTTOM_CANCEL;
  	}
  	double dx = fabs(x - s->x), dy = s->y - y;
 -	if ((uint32_t)(time - s->time) > 700 || dx > 24 || dy < -12) {
 +	/* 1.5 s: the swipe now drives the overview, and a finger that
 +	 * follows it may start slowly. */
-+	if ((uint32_t)(time - s->time) > 1500 || dx > 24 || dy < -12) {
++	/* A thumb goes up in an arc: sideways counts only against the way up. */
++	if ((uint32_t)(time - s->time) > 1500 || dy < -12 || (dx > 24 && dx >= dy)) {
  		s->pending = false;
  		return BOTTOM_PASS;
+ 	}
+-	if (dy >= 40 && dy > dx * 1.5) {
++	if (dy >= 24 && dy > dx) {
+ 		s->pending = false;
+ 		return BOTTOM_CLAIM;
  	}
 diff --git a/include/overview.h b/include/overview.h
 index bc46628..89af58b 100644
@@ -71,7 +86,7 @@ index d3eff09..8e2d761 100644
  	}
  
 diff --git a/src/input/touch.c b/src/input/touch.c
-index e81450c..57f15dc 100644
+index e81450c..8674e11 100644
 --- a/src/input/touch.c
 +++ b/src/input/touch.c
 @@ -2,6 +2,13 @@
@@ -88,7 +103,7 @@ index e81450c..57f15dc 100644
  #include <wayland-util.h>
  #include <wlr/types/wlr_cursor.h>
  #include <wlr/types/wlr_scene.h>
-@@ -63,6 +70,143 @@ static struct {
+@@ -63,6 +70,146 @@ static struct {
  	int32_t touch_id;
  } overview_finger;
  
@@ -109,10 +124,13 @@ index e81450c..57f15dc 100644
 +	double sent;      /* the last progress sent, -1 before any */
 +} edge = { .fd = -1 };
 +
-+/* Up to here the overview opens with the finger. */
-+#define EDGE_RECEDE 0.45
++/* Here the overview is open (its own gestures take 0.3 of the height). */
++#define EDGE_OPEN 0.18
++#define EDGE_PACE (0.3 / EDGE_OPEN)
++/* Up to here it holds open; from here the far surface comes in. */
++#define EDGE_RECEDE 0.22
 +/* Here the overview has gone back entirely and the far surface is in. */
-+#define EDGE_GONE (EDGE_RECEDE * 4 / 3)
++#define EDGE_GONE 0.36
 +/* From here, halfway between, letting go is the far command's. */
 +#define EDGE_FAR ((EDGE_RECEDE + EDGE_GONE) / 2)
 +
@@ -123,10 +141,10 @@ index e81450c..57f15dc 100644
 +	/* With a surface following the finger (edge.fd), the overview holds
 +	 * still under it rather than growing its windows back. */
 +	if (travel <= recede || !edge.far_command || edge.fd >= 0) {
-+		return travel;
++		return travel * EDGE_PACE;
 +	}
 +	/* Going on, the overview goes back, three times as fast. */
-+	return fmax(0, recede - (travel - recede) * 3);
++	return fmax(0, recede - (travel - recede) * 3) * EDGE_PACE;
 +}
 +
 +/* How far the far command's surface is in, 0 to 1. */
@@ -232,7 +250,7 @@ index e81450c..57f15dc 100644
  static struct wlr_surface *
  touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
  		double *x_offset, double *y_offset)
-@@ -352,7 +496,25 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
+@@ -352,7 +499,25 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
  		lx, ly, event->time_msec, bottom_swipe_allowed(config, output));
  	if (result == BOTTOM_CLAIM || result == BOTTOM_CANCEL) {
  		cancel_touch_client(seat, point);
@@ -259,7 +277,7 @@ index e81450c..57f15dc 100644
  			spawn_async_no_shell(config->bottom_swipe_command);
  		}
  		return true;
-@@ -385,6 +547,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
+@@ -385,6 +550,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
  		if (four_fingers_motion(seat, event->time_msec)) {
  			return;
  		}
@@ -270,7 +288,7 @@ index e81450c..57f15dc 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_motion(lx, ly, event->time_msec);
  			return;
-@@ -531,6 +697,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
+@@ -531,6 +700,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
  		}
  		/* The first of the four fingers to lift ends their gesture. */
  		four_fingers_stop();
@@ -280,7 +298,7 @@ index e81450c..57f15dc 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_finger.active = false;
  			overview_release(event->time_msec);
-@@ -565,6 +734,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
+@@ -565,6 +737,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
  			continue;
  		}
  		four_fingers_stop();

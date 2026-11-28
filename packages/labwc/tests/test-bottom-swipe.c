@@ -33,5 +33,11 @@ int main(void)
     bottom_swipe_begin(&s, portrait, 300, 1020, 100, true);
     s.pending = false; /* second contact / hardware cancellation */
     assert(bottom_swipe_motion(&s, portrait, 300, 970, 200, true) == BOTTOM_PASS);
+    /* A fast thumb on an iPhone XR (recorded): it starts a little above the
+     * lowest row and drifts sideways in an arc as it goes up. */
+    bottom_swipe_begin(&s, portrait, 293, 1008, 100, true);
+    assert(s.pending);
+    assert(bottom_swipe_motion(&s, portrait, 280, 990, 120, true) == BOTTOM_WAIT);
+    assert(bottom_swipe_motion(&s, portrait, 269, 960, 140, true) == BOTTOM_CLAIM);
     puts("bottom swipe: edge, threshold, once-only, direction, timeout, lock, rotation, output offset, clock wrap and cancellation OK");
 }
