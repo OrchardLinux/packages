@@ -86,7 +86,7 @@ index d3eff09..8e2d761 100644
  	}
  
 diff --git a/src/input/touch.c b/src/input/touch.c
-index e81450c..3f3a394 100644
+index e81450c..3a22c6d 100644
 --- a/src/input/touch.c
 +++ b/src/input/touch.c
 @@ -2,6 +2,13 @@
@@ -103,7 +103,7 @@ index e81450c..3f3a394 100644
  #include <wayland-util.h>
  #include <wlr/types/wlr_cursor.h>
  #include <wlr/types/wlr_scene.h>
-@@ -63,6 +70,166 @@ static struct {
+@@ -63,6 +70,185 @@ static struct {
  	int32_t touch_id;
  } overview_finger;
  
@@ -122,6 +122,7 @@ index e81450c..3f3a394 100644
 +	char *far_socket; /* its path, or NULL */
 +	int fd;           /* connected to far_socket, or -1 */
 +	double sent;      /* the last progress sent, -1 before any */
++	bool fast;        /* a fast drag: nothing shows until it ends or slows */
 +	double velocity;  /* upward, in px per ms, smoothed */
 +	double last_travel;
 +	uint32_t last_time; /* 0 before the first motion */
@@ -136,15 +137,22 @@ index e81450c..3f3a394 100644
 +#define EDGE_GONE 0.36
 +/* From here, halfway between, letting go is the far command's. */
 +#define EDGE_FAR ((EDGE_RECEDE + EDGE_GONE) / 2)
-+/* A flick, this fast upward when let go (px per ms), past where the
-+ * overview is open, skips the overview for the far command. */
-+#define EDGE_FLING 1.0
++/*
++ * A drag that starts this fast (px per ms) is a fast one: the overview and
++ * the far surface stay out of it, and only where it ends counts. Slowing to
++ * half that makes it a slow one, which shows the way as it goes.
++ */
++#define EDGE_FAST 1.0
 +
-+static bool
-+edge_goes_far(double travel, double velocity)
++/* Where a drag that ends here goes: 2 the far command, 1 the overview, 0
++ * nowhere. A fast drag needs to have gone half the overview's way. */
++static int
++edge_end_target(double travel, bool fast)
 +{
-+	return travel >= edge.height * EDGE_FAR
-+		|| (velocity >= EDGE_FLING && travel >= edge.height * EDGE_OPEN);
++	if (travel >= edge.height * EDGE_FAR) {
++		return 2;
++	}
++	return !fast || travel >= edge.height * EDGE_OPEN / 2 ? 1 : 0;
 +}
 +
 +static double
@@ -220,8 +228,8 @@ index e81450c..3f3a394 100644
 +		return;
 +	}
 +	edge.active = false;
-+	bool far = released && edge.far_command
-+		&& edge_goes_far(edge.travel, edge.velocity);
++	int target = released ? edge_end_target(edge.travel, edge.fast) : 0;
++	bool far = target == 2 && edge.far_command;
 +	bool followed = edge.fd >= 0 && edge.sent >= 0;
 +	if (edge.sent >= 0) {
 +		edge_send(far ? "end 1\n" : "end 0\n");
@@ -240,7 +248,12 @@ index e81450c..3f3a394 100644
 +		}
 +		/* Opens it when nothing followed the finger; else no change. */
 +		spawn_async_no_shell(edge.far_command);
-+	} else if (released) {
++	} else if (released && edge.fast && target == 1) {
++		/* A fast drag that ended where the overview is: it opens. */
++		overview_gesture_update(edge_overview_travel(edge.height * EDGE_OPEN),
++			edge.last_time);
++		overview_gesture_end();
++	} else if (released && !edge.fast) {
 +		overview_gesture_end();
 +	} else {
 +		overview_gesture_end_closed();
@@ -260,6 +273,12 @@ index e81450c..3f3a394 100644
 +	}
 +	edge.last_travel = edge.travel;
 +	edge.last_time = time_msec;
++	if (edge.fast && edge.velocity < EDGE_FAST / 2) {
++		edge.fast = false;
++	}
++	if (edge.fast) {
++		return;
++	}
 +	/* First the follower, which decides whether the overview goes back. */
 +	if (edge.far_command) {
 +		edge_follow(edge.travel);
@@ -270,7 +289,7 @@ index e81450c..3f3a394 100644
  static struct wlr_surface *
  touch_get_coords(struct seat *seat, struct wlr_touch *touch, double x, double y,
  		double *x_offset, double *y_offset)
-@@ -352,7 +519,27 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
+@@ -352,7 +538,30 @@ handle_bottom_swipe_motion(struct seat *seat, struct touch_point *point,
  		lx, ly, event->time_msec, bottom_swipe_allowed(config, output));
  	if (result == BOTTOM_CLAIM || result == BOTTOM_CANCEL) {
  		cancel_touch_client(seat, point);
@@ -292,14 +311,17 @@ index e81450c..3f3a394 100644
 +				? xstrdup(config->bottom_swipe_far_socket) : NULL;
 +			edge.fd = -1;
 +			edge.sent = -1;
-+			edge.velocity = 0;
++			/* How fast it came up to the claim tells a fast drag. */
++			uint32_t took = event->time_msec - point->swipe.time;
++			edge.velocity = (point->swipe.y - ly) / (took ? took : 1);
++			edge.fast = edge.velocity >= EDGE_FAST;
 +			edge.last_time = 0;
 +			edge_motion(ly, event->time_msec);
 +		} else {
  			spawn_async_no_shell(config->bottom_swipe_command);
  		}
  		return true;
-@@ -385,6 +572,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
+@@ -385,6 +594,10 @@ handle_touch_motion(struct wl_listener *listener, void *data)
  		if (four_fingers_motion(seat, event->time_msec)) {
  			return;
  		}
@@ -310,7 +332,7 @@ index e81450c..3f3a394 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_motion(lx, ly, event->time_msec);
  			return;
-@@ -531,6 +722,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
+@@ -531,6 +744,9 @@ handle_touch_up(struct wl_listener *listener, void *data)
  		}
  		/* The first of the four fingers to lift ends their gesture. */
  		four_fingers_stop();
@@ -320,7 +342,7 @@ index e81450c..3f3a394 100644
  		if (overview_finger.active && overview_finger.touch_id == event->touch_id) {
  			overview_finger.active = false;
  			overview_release(event->time_msec);
-@@ -565,6 +759,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
+@@ -565,6 +781,9 @@ handle_touch_cancel(struct wl_listener *listener, void *data)
  			continue;
  		}
  		four_fingers_stop();

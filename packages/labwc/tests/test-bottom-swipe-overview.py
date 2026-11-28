@@ -31,7 +31,7 @@ def function(name):
 
 fixture = '#include <assert.h>\n#include <math.h>\n#include <stdbool.h>\n#include <stddef.h>\n' + defines + r'''
 static struct { double height; char *far_command; int fd; } edge;
-''' + function('edge_goes_far') + '\n' + function('edge_overview_travel') + r'''
+''' + function('edge_end_target') + '\n' + function('edge_overview_travel') + r'''
 int main(void) {
     edge.height = 1000;
     edge.far_command = "launcher";
@@ -49,12 +49,13 @@ int main(void) {
     edge.fd = -1;
     edge.far_command = NULL;
     assert(edge_overview_travel(400) >= 300);   /* nothing beyond: keeps following */
-    /* Letting go: past EDGE_FAR it is the launcher; a flick (a thumb's on
-     * an iPhone XR goes 2 px/ms) once the overview is open, too. */
-    assert(!edge_goes_far(250, 0.3));
-    assert(edge_goes_far(300, 0.3));
-    assert(edge_goes_far(200, 2.0));
-    assert(!edge_goes_far(150, 2.0));           /* not high enough */
+    /* Where it ends decides, fast or slow: past EDGE_FAR the launcher,
+     * below it the overview; a fast drag that hardly went is nothing. */
+    assert(edge_end_target(300, false) == 2 && edge_end_target(300, true) == 2);
+    assert(edge_end_target(250, false) == 1 && edge_end_target(250, true) == 1);
+    assert(edge_end_target(100, true) == 1);
+    assert(edge_end_target(60, true) == 0);
+    assert(edge_end_target(30, false) == 1);   /* slow: the overview settles it */
     return 0;
 }
 '''
