@@ -16,17 +16,22 @@ source = Path(sys.argv[1])
 touch = (source / 'src/input/touch.c').read_text()
 defines = '\n'.join(re.findall(r'^#define EDGE_\w+ .*$', touch, re.M))
 assert 'EDGE_RECEDE' in defines and 'EDGE_FAR' in defines, 'EDGE_ defines'
-match = re.search(r'static double\nedge_overview_travel\(double travel\)\n\{', touch)
-assert match, 'edge_overview_travel'
-end = touch.index('{', match.start()) + 1
-depth = 1
-while depth:
-    if touch[end] == '{': depth += 1
-    if touch[end] == '}': depth -= 1
-    end += 1
-fixture = '#include <assert.h>\n#include <math.h>\n#include <stddef.h>\n' + defines + r'''
+def function(name):
+    """The source of one of touch.c's static functions."""
+    match = re.search(r'static \w+\n' + name + r'\([^)]*\)\n\{', touch)
+    assert match, name
+    end = touch.index('{', match.start()) + 1
+    depth = 1
+    while depth:
+        if touch[end] == '{': depth += 1
+        if touch[end] == '}': depth -= 1
+        end += 1
+    return touch[match.start():end]
+
+
+fixture = '#include <assert.h>\n#include <math.h>\n#include <stdbool.h>\n#include <stddef.h>\n' + defines + r'''
 static struct { double height; char *far_command; int fd; } edge;
-''' + touch[match.start():end] + r'''
+''' + function('edge_end_target') + '\n' + function('edge_overview_travel') + r'''
 int main(void) {
     edge.height = 1000;
     edge.far_command = "launcher";
@@ -44,6 +49,13 @@ int main(void) {
     edge.fd = -1;
     edge.far_command = NULL;
     assert(edge_overview_travel(400) >= 300);   /* nothing beyond: keeps following */
+    /* Where it ends decides, fast or slow: past EDGE_FAR the launcher,
+     * below it the overview; a fast drag that hardly went is nothing. */
+    assert(edge_end_target(300, false) == 2 && edge_end_target(300, true) == 2);
+    assert(edge_end_target(250, false) == 1 && edge_end_target(250, true) == 1);
+    assert(edge_end_target(100, true) == 1);
+    assert(edge_end_target(60, true) == 0);
+    assert(edge_end_target(30, false) == 1);   /* slow: the overview settles it */
     return 0;
 }
 '''
