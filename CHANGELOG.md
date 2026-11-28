@@ -12,6 +12,11 @@ to `main` publishes every changed version at once, so when merging, rename
 
 ## Unreleased
 
+### labwc 1:0.20.2-13
+
+- A fast flick up from the bottom edge goes straight to the launcher once
+  it is past where the overview opens, instead of stopping at the overview.
+
 ### labwc 1:0.20.2-12
 
 - The bottom swipe is shorter and catches fast flicks: the overview is open
