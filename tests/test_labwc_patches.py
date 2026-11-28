@@ -26,15 +26,32 @@ def added_file(patch, name):
     return '\n'.join(body) + '\n'
 
 
+def later_changes(patch, name):
+    """The hunks of the patches after this one that change the file, in order."""
+    later = sorted(p for p in (LABWC / 'patches').glob('*.patch') if p.name > patch)
+    for path in later:
+        lines = path.read_text().splitlines(keepends=True)
+        header = f'diff --git a/{name} b/{name}\n'
+        if header not in lines:
+            continue
+        start = lines.index(header)
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('diff --git')), len(lines))
+        yield ''.join(lines[start:end])
+
+
 @unittest.skipUnless(shutil.which('cc'), 'needs a C compiler')
 class PatchMath(unittest.TestCase):
     def run_test(self, patch, header, test):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
-            target = work / header
+            target = work / 'include' / header
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(added_file(patch, 'include/' + header))
-            subprocess.run(['cc', '-Wall', '-Werror', '-I', str(work), '-o', str(work / 'test'),
+            # As the recipe has it: with what later patches change in it.
+            for change in later_changes(patch, 'include/' + header):
+                subprocess.run(['patch', '--batch', '--fuzz=0', '-s', '-p1', '-d', str(work)],
+                               input=change, text=True, check=True)
+            subprocess.run(['cc', '-Wall', '-Werror', '-I', str(work / 'include'), '-o', str(work / 'test'),
                             str(LABWC / 'tests' / test), '-lm'], check=True)
             result = subprocess.run([str(work / 'test')], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
